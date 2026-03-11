@@ -1,51 +1,50 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
-type BurgerVanCardProps = {
+type Props = {
+  id: string;
   name: string;
   cuisine: string;
   rating: number;
 };
 
 export default function BurgerVanCard({
+  id,
   name,
   cuisine,
   rating,
-}: BurgerVanCardProps) {
+}: Props) {
   return (
-    <View style={styles.card}>
+    <Pressable
+      onPress={() => router.push(`/vendor/${id}`)}
+      style={styles.card}
+    >
       <Text style={styles.name}>{name}</Text>
       <Text style={styles.meta}>{cuisine}</Text>
-      <Text style={styles.rating}>⭐ {rating.toFixed(1)}</Text>
-    </View>
+      <Text style={styles.rating}>⭐ {rating}</Text>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#fff',
     borderRadius: 18,
     padding: 16,
     marginBottom: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
     elevation: 2,
   },
   name: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1F1F1F',
-    marginBottom: 4,
   },
   meta: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 8,
   },
   rating: {
     fontSize: 14,
-    fontWeight: '600',
     color: '#E53935',
+    marginTop: 6,
   },
 });

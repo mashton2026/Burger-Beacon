@@ -24,6 +24,7 @@ export default function HomeScreen() {
         }
         renderItem={({ item }) => (
           <BurgerVanCard
+           id={item.id}
             name={item.name}
             cuisine={item.cuisine}
             rating={item.rating}
