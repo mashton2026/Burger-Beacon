@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Burger Beacon",
-    "slug": "burger-beacon",
-    "scheme": "burgerbeacon",
+    "name": "bitebeacon",
+    "slug": "bitebeacon",
+    "scheme": "bitebeacon",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "light",

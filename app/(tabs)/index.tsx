@@ -16,7 +16,7 @@ export default function HomeScreen() {
               style={styles.logo}
               resizeMode="contain"
             />
-            <Text style={styles.title}>Burger Beacon</Text>
+            <Text style={styles.title}>bitebeacon</Text>
             <Text style={styles.subtitle}>
               Discover the best street food traders near you.
             </Text>
