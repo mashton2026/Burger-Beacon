@@ -1,26 +1,56 @@
-export const mockVans = [
+export type Van = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  rating: number;
+  cuisine: string;
+  temporary?: boolean;
+  photo?: string | null;
+  vendorName?: string;
+  menu?: string;
+  schedule?: string;
+  isLive: boolean;
+  views?: number;
+  directions?: number;
+};
+
+export const mockVans: Van[] = [
   {
-    id: '1',
+    id: "1",
     name: "Big Dave's Burgers",
     lat: 51.5074,
     lng: -0.1278,
     rating: 4.7,
-    cuisine: 'Burgers',
+    cuisine: "Burgers",
+    vendorName: "Big Dave",
+    menu: "Classic burger, cheeseburger, fries",
+    schedule: "Mon-Fri 11:00-15:00",
+    isLive: true
   },
   {
-    id: '2',
-    name: 'Smash Patty Co',
+    id: "2",
+    name: "Smash Patty Co",
     lat: 51.509,
     lng: -0.13,
     rating: 4.5,
-    cuisine: 'Smash Burgers',
+    cuisine: "Smash Burgers",
+    vendorName: "Smash Patty Co",
+    menu: "Double smash, loaded fries, soft drinks",
+    schedule: "Tue-Sat 12:00-19:00",
+    isLive: true
   },
   {
-    id: '3',
-    name: 'Street Grill',
+    id: "3",
+    name: "Street Grill",
     lat: 51.505,
     lng: -0.09,
     rating: 4.8,
-    cuisine: 'BBQ',
+    cuisine: "BBQ",
+    vendorName: "Street Grill",
+    menu: "BBQ burger, ribs, wings",
+    schedule: "Wed-Sun 13:00-20:00",
+    isLive: true
+
   },
 ];
