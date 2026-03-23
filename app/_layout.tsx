@@ -24,6 +24,14 @@ export default function RootLayout() {
         <Stack.Screen name="vendor/pick-location" />
         <Stack.Screen name="vendor/register" />
         <Stack.Screen name="vendor/upgrade" />
+        <Stack.Screen name="vendor/claim" />
+        <Stack.Screen name="vendor/claim-select" />
+        <Stack.Screen name="account/security" />
+        <Stack.Screen name="account/help" />
+        <Stack.Screen name="account/terms" />
+        <Stack.Screen name="account/privacy" />
+        <Stack.Screen name="admin/index" />
+        <Stack.Screen name="admin/claims" />
         <Stack.Screen
           name="modal"
           options={{ presentation: "modal", title: "Modal" }}

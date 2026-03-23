@@ -12,6 +12,9 @@ type CreateVendorInput = {
   lat: number;
   lng: number;
   photo?: string | null;
+  photos?: string[];
+  menuPdfUrl?: string | null;
+  menuPdfName?: string | null;
   temporary?: boolean;
   isLive?: boolean;
   owner_id?: string | null;
@@ -29,6 +32,9 @@ type UpdateVendorInput = {
   menu?: string;
   schedule?: string;
   photo?: string | null;
+  photos?: string[];
+  menuPdfUrl?: string | null;
+  menuPdfName?: string | null;
   isLive?: boolean;
   foodCategories?: string[];
 };
@@ -66,17 +72,18 @@ export async function getVendorByOwnerId(ownerId: string): Promise<Van | null> {
     .from("vendors")
     .select("*")
     .eq("owner_id", ownerId)
-    .order("id", { ascending: true });
+    .limit(1)
+    .maybeSingle();
 
   if (error) {
     throw new Error(error.message);
   }
 
-  if (!data || data.length === 0) {
+  if (!data) {
     return null;
   }
 
-  return mapVendorRowToVan(data[0]);
+  return mapVendorRowToVan(data);
 }
 
 export async function createVendor(input: CreateVendorInput): Promise<void> {
@@ -91,7 +98,10 @@ export async function createVendor(input: CreateVendorInput): Promise<void> {
     lng: input.lng,
     rating: input.rating ?? 0,
     temporary: input.temporary ?? false,
-    photo: input.photo ?? null,
+    photo: input.photo ?? input.photos?.[0] ?? null,
+    photos: input.photos ?? (input.photo ? [input.photo] : []),
+    menu_pdf_url: input.menuPdfUrl ?? null,
+    menu_pdf_name: input.menuPdfName ?? null,
     is_live: input.isLive ?? false,
     owner_id: input.owner_id ?? null,
     views: input.views ?? 0,
@@ -117,9 +127,14 @@ export async function updateVendor(
   if (input.menu !== undefined) updates.menu = input.menu;
   if (input.schedule !== undefined) updates.schedule = input.schedule;
   if (input.photo !== undefined) updates.photo = input.photo;
+  if (input.photos !== undefined) {
+    updates.photos = input.photos;
+    updates.photo = input.photos[0] ?? null;
+  }
+  if (input.menuPdfUrl !== undefined) updates.menu_pdf_url = input.menuPdfUrl;
+  if (input.menuPdfName !== undefined) updates.menu_pdf_name = input.menuPdfName;
   if (input.isLive !== undefined) updates.is_live = input.isLive;
   if (input.foodCategories !== undefined) updates.food_categories = input.foodCategories;
-
   const { error } = await supabase.from("vendors").update(updates).eq("id", id);
 
   if (error) {
@@ -129,6 +144,20 @@ export async function updateVendor(
 
 export async function deleteVendor(id: string): Promise<void> {
   const { error } = await supabase.from("vendors").delete().eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function updateVendorSubscriptionTier(
+  id: string,
+  tier: "free" | "growth" | "pro"
+): Promise<void> {
+  const { error } = await supabase
+    .from("vendors")
+    .update({ subscription_tier: tier })
+    .eq("id", id);
 
   if (error) {
     throw new Error(error.message);

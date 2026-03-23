@@ -8,6 +8,8 @@ import {
   signOutCurrentUser,
 } from "../../services/authService";
 
+const ADMIN_EMAILS = ["m.l.ashton2024@gmail.com"];
+
 export default function AccountScreen() {
   const [email, setEmail] = useState<string | null>(null);
   const [isVendor, setIsVendor] = useState(false);
@@ -29,7 +31,7 @@ export default function AccountScreen() {
       return;
     }
 
-    setEmail(user.email);
+    setEmail(user.email ?? null);
 
     try {
       const vendor = await getCurrentUserVendor();
@@ -48,6 +50,8 @@ export default function AccountScreen() {
     }
   }
 
+  const isAdmin = !!email && ADMIN_EMAILS.includes(email.toLowerCase());
+
   async function handleLogout() {
     try {
       await signOutCurrentUser();
@@ -62,136 +66,216 @@ export default function AccountScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Your Account</Text>
+      <Text style={styles.title}>Account</Text>
 
       <Text style={styles.subtitle}>
-        {email ? `Signed in as ${email}` : "You are browsing as a guest."}
+        {email ? `Signed in as ${email}` : "Browsing as a guest"}
       </Text>
 
-      {!email ? (
+      {!email && (
         <>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Welcome to BiteBeacon</Text>
-            <Text style={styles.cardText}>
-              Browse vendors as a guest, or create an account to save favourites
-              and build your own BiteBeacon experience.
-            </Text>
-          </View>
+          <Section title="Get Started" />
 
-          <View style={styles.actionGroup}>
-            <Pressable
-              style={styles.primaryButton}
-              onPress={() => router.push("/auth/user-login")}
-            >
-              <Text style={styles.primaryButtonText}>User Login</Text>
-            </Pressable>
+          <Row
+            label="User Login"
+            onPress={() => router.push("/auth/user-login")}
+          />
 
-            <Pressable
-              style={styles.secondaryButton}
-              onPress={() => router.push("/auth/user-signup")}
-            >
-              <Text style={styles.secondaryButtonText}>Create User Account</Text>
-            </Pressable>
+          <Row
+            label="Create Account"
+            onPress={() => router.push("/auth/user-signup")}
+          />
 
-            <Pressable
-              style={styles.secondaryButton}
-              onPress={() => router.push("/auth/login")}
-            >
-              <Text style={styles.secondaryButtonText}>Vendor Portal</Text>
-            </Pressable>
-          </View>
+          <Row
+            label="Vendor Portal"
+            onPress={() => router.push("/auth/login")}
+          />
+
+          <Section title="Help & Support" />
+
+          <Row
+            label="Contact BiteBeacon Support"
+            onPress={() => router.push("/account/help")}
+          />
+
+          <Section title="Legal" />
+
+          <Row
+            label="Terms & Conditions"
+            onPress={() => router.push("/account/terms")}
+          />
+
+          <Row
+            label="Privacy Policy"
+            onPress={() => router.push("/account/privacy")}
+          />
         </>
-      ) : !isVendor ? (
+      )}
+
+      {email && !isVendor && !isAdmin && (
         <>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>User Dashboard</Text>
-            <Text style={styles.cardText}>
-              Use your account to keep track of favourites and quickly jump back
-              into discovery.
-            </Text>
-          </View>
+          <Section title="Your Activity" />
 
-          <View style={styles.grid}>
-            <Pressable
-              style={styles.gridCard}
-              onPress={() => router.push("/(tabs)/favourites")}
-            >
-              <Text style={styles.gridCardTitle}>Favourites</Text>
-              <Text style={styles.gridCardText}>
-                View your saved food vendors
-              </Text>
-            </Pressable>
+          <Row
+            label="Favourites"
+            onPress={() => router.push("/(tabs)/favourites")}
+          />
 
-            <Pressable
-              style={styles.gridCard}
-              onPress={() => router.push("/(tabs)/explore")}
-            >
-              <Text style={styles.gridCardTitle}>Open Map</Text>
-              <Text style={styles.gridCardText}>
-                Discover vendors near you
-              </Text>
-            </Pressable>
-          </View>
+          <Row
+            label="Explore Map"
+            onPress={() => router.push("/(tabs)/explore")}
+          />
 
-          <Pressable style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutButtonText}>Log Out</Text>
-          </Pressable>
+          <Section title="Security" />
+
+          <Row
+            label="Account Settings"
+            onPress={() => router.push("/account/security")}
+          />
+
+          <Section title="Help & Support" />
+
+          <Row
+            label="Contact BiteBeacon Support"
+            onPress={() => router.push("/account/help")}
+          />
+
+          <Section title="Legal" />
+
+          <Row
+            label="Terms & Conditions"
+            onPress={() => router.push("/account/terms")}
+          />
+
+          <Row
+            label="Privacy Policy"
+            onPress={() => router.push("/account/privacy")}
+          />
+
+          <LogoutButton onPress={handleLogout} />
         </>
-      ) : (
+      )}
+
+      {email && isVendor && !isAdmin && (
         <>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Vendor Signed In</Text>
-            <Text style={styles.cardText}>
-              Your vendor tools live in the Vendor Dashboard, where you can
-              manage your listing, update details, and control live status.
-            </Text>
-          </View>
+          <Section title="Vendor Tools" />
 
-          <View style={styles.grid}>
-            {vendorId ? (
-              <Pressable
-                style={styles.gridCard}
-                onPress={() =>
-                  router.push({
-                    pathname: "/vendor/dashboard",
-                    params: { id: vendorId },
-                  })
-                }
-              >
-                <Text style={styles.gridCardTitle}>Dashboard</Text>
-                <Text style={styles.gridCardText}>
-                  Manage your vendor listing
-                </Text>
-              </Pressable>
-            ) : null}
+          {vendorId && (
+            <Row
+              label="Dashboard"
+              onPress={() =>
+                router.push({
+                  pathname: "/vendor/dashboard",
+                  params: { id: vendorId },
+                })
+              }
+            />
+          )}
 
-            <Pressable
-              style={styles.gridCard}
-              onPress={() => {
-                if (vendorId) {
-                  router.push({
-                    pathname: "/vendor/dashboard",
-                    params: { id: vendorId },
-                  });
-                  return;
-                }
+          {vendorId && (
+            <Row
+              label="View Listing"
+              onPress={() =>
+                router.push({
+                  pathname: "/vendor/[id]",
+                  params: { id: vendorId },
+                })
+              }
+            />
+          )}
 
-                router.push("/auth/login");
-              }}
-            >
-              <Text style={styles.gridCardTitle}>Vendor Portal</Text>
-              <Text style={styles.gridCardText}>
-                Return to vendor tools
-              </Text>
-            </Pressable>
-          </View>
+          <Section title="Security" />
 
-          <Pressable style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutButtonText}>Log Out</Text>
-          </Pressable>
+          <Row
+            label="Account Settings"
+            onPress={() => router.push("/account/security")}
+          />
+
+          <Section title="Help & Support" />
+
+          <Row
+            label="Contact BiteBeacon Support"
+            onPress={() => router.push("/account/help")}
+          />
+
+          <Section title="Legal" />
+
+          <Row
+            label="Terms & Conditions"
+            onPress={() => router.push("/account/terms")}
+          />
+
+          <Row
+            label="Privacy Policy"
+            onPress={() => router.push("/account/privacy")}
+          />
+
+          <LogoutButton onPress={handleLogout} />
+        </>
+      )}
+
+      {email && isAdmin && (
+        <>
+          <Section title="Admin" />
+
+          <Row label="Control Centre" onPress={() => router.push("/admin")} />
+
+          <Section title="Security" />
+
+          <Row
+            label="Account Settings"
+            onPress={() => router.push("/account/security")}
+          />
+
+          <Section title="Help & Support" />
+
+          <Row
+            label="Contact BiteBeacon Support"
+            onPress={() => router.push("/account/help")}
+          />
+
+          <Section title="Legal" />
+
+          <Row
+            label="Terms & Conditions"
+            onPress={() => router.push("/account/terms")}
+          />
+
+          <Row
+            label="Privacy Policy"
+            onPress={() => router.push("/account/privacy")}
+          />
+
+          <LogoutButton onPress={handleLogout} />
         </>
       )}
     </View>
+  );
+}
+
+function Section({ title }: { title: string }) {
+  return <Text style={styles.section}>{title}</Text>;
+}
+
+function Row({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.row} onPress={onPress}>
+      <Text style={styles.rowText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function LogoutButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable style={styles.logoutButton} onPress={onPress}>
+      <Text style={styles.logoutText}>Log Out</Text>
+    </Pressable>
   );
 }
 
@@ -211,94 +295,41 @@ const styles = StyleSheet.create({
 
   subtitle: {
     fontSize: 15,
-    color: "rgba(255,255,255,0.75)",
-    marginBottom: 24,
-  },
-
-  card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 18,
+    color: "rgba(255,255,255,0.7)",
     marginBottom: 20,
   },
 
-  cardTitle: {
-    fontSize: 20,
+  section: {
+    fontSize: 12,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: theme.colors.secondary,
+    marginTop: 18,
     marginBottom: 8,
+    letterSpacing: 1,
   },
 
-  cardText: {
-    fontSize: 15,
-    color: "#444",
-    lineHeight: 22,
-  },
-
-  actionGroup: {
-    gap: 12,
-  },
-
-  grid: {
-    gap: 12,
-    marginBottom: 20,
-  },
-
-  gridCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 18,
-  },
-
-  gridCardTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#0B2A5B",
-    marginBottom: 6,
-  },
-
-  gridCardText: {
-    fontSize: 14,
-    color: "#555",
-    lineHeight: 20,
-  },
-
-  primaryButton: {
-    backgroundColor: "#FFFFFF",
+  row: {
     paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.08)",
   },
 
-  primaryButtonText: {
-    color: "#0B2A5B",
+  rowText: {
     fontSize: 16,
-    fontWeight: "700",
-  },
-
-  secondaryButton: {
-    backgroundColor: "#FF7A00",
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-  },
-
-  secondaryButtonText: {
     color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
+    fontWeight: "600",
   },
 
   logoutButton: {
+    marginTop: 24,
     backgroundColor: "#C62828",
     paddingVertical: 14,
     borderRadius: 16,
     alignItems: "center",
   },
 
-  logoutButtonText: {
+  logoutText: {
     color: "#FFFFFF",
-    fontSize: 16,
     fontWeight: "700",
   },
 });

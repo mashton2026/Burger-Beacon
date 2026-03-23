@@ -1,12 +1,10 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Image,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,14 +13,22 @@ import {
   View,
 } from "react-native";
 import MapView, { MapPressEvent, Marker, Region } from "react-native-maps";
+
+import markerFeatured from "../../assets/markers/marker-featured.png";
+import markerLive from "../../assets/markers/marker-live.png";
+import markerOffline from "../../assets/markers/marker-offline.png";
+import markerSpotted from "../../assets/markers/marker-spotted.png";
 import { getSubscriptionFeatures } from "../../lib/subscriptionFeatures";
-import { getAllVendors } from "../../services/vendorService";
+import { getCurrentUser } from "../../services/authService";
+import { createVendor, getAllVendors } from "../../services/vendorService";
 import { type Van } from "../../types/van";
 
 type SpotPin = {
   latitude: number;
   longitude: number;
 };
+
+type FilterType = "all" | "live" | "spotted";
 
 const DEFAULT_REGION: Region = {
   latitude: 51.5074,
@@ -31,7 +37,87 @@ const DEFAULT_REGION: Region = {
   longitudeDelta: 0.05,
 };
 
-const SPOTTED_VANS_KEY = "bitebeacon_spotted_vans";
+const BITEBEACON_MAP_STYLE = [
+  {
+    elementType: "geometry",
+    stylers: [{ color: "#eaf0f6" }],
+  },
+  {
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#355070" }],
+  },
+  {
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#ffffff" }],
+  },
+  {
+    featureType: "administrative",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#cfd8e3" }],
+  },
+  {
+    featureType: "poi",
+    elementType: "geometry",
+    stylers: [{ color: "#f6efe8" }],
+  },
+  {
+    featureType: "poi.park",
+    elementType: "geometry",
+    stylers: [{ color: "#dfeee1" }],
+  },
+  {
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [{ color: "#ffffff" }],
+  },
+  {
+    featureType: "road",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#dbe4ef" }],
+  },
+  {
+    featureType: "road.arterial",
+    elementType: "geometry",
+    stylers: [{ color: "#fff7ef" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry",
+    stylers: [{ color: "#ffe4cc" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#ffb979" }],
+  },
+  {
+    featureType: "transit",
+    elementType: "geometry",
+    stylers: [{ color: "#e5eaf0" }],
+  },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#bfd8f5" }],
+  },
+];
+
+function getMarkerImage(van: Van) {
+  if (van.temporary) return markerSpotted;
+  if (van.subscriptionTier === "pro") return markerFeatured;
+  if (getSubscriptionFeatures(van.subscriptionTier).liveStatus && van.isLive) {
+    return markerLive;
+  }
+  return markerOffline;
+}
+
+function getStatusLabel(van: Van) {
+  if (van.temporary) return "SPOTTED";
+  if (getSubscriptionFeatures(van.subscriptionTier).liveStatus) {
+    return van.isLive ? "LIVE" : "LISTED";
+  }
+  return "LISTED";
+}
 
 export default function MapScreen() {
   const params = useLocalSearchParams();
@@ -41,14 +127,17 @@ export default function MapScreen() {
   const [spotMode, setSpotMode] = useState(false);
   const [spotName, setSpotName] = useState("");
   const [spotCuisine, setSpotCuisine] = useState("");
-  const [spotPhoto, setSpotPhoto] = useState<string | null>(null);
-  const [spottedVans, setSpottedVans] = useState<Van[]>([]);
   const [supabaseVans, setSupabaseVans] = useState<Van[]>([]);
   const [selectedSpotPin, setSelectedSpotPin] = useState<SpotPin | null>(null);
   const [selectedVan, setSelectedVan] = useState<Van | null>(null);
-  const [selectedFilter, setSelectedFilter] = useState<"all" | "live" | "spotted">("all");
+  const [selectedFilter, setSelectedFilter] = useState<FilterType>("all");
   const [userRegion, setUserRegion] = useState<Region>(DEFAULT_REGION);
   const [locationReady, setLocationReady] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
+
+  const selectedMarkerScale = useRef(new Animated.Value(1)).current;
+  const cardTranslateY = useRef(new Animated.Value(20)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     requestUserLocation();
@@ -57,31 +146,34 @@ export default function MapScreen() {
   useFocusEffect(
     useCallback(() => {
       loadSupabaseVans();
-      loadSpottedVans();
     }, [])
   );
 
   useEffect(() => {
-    if (params.lat && params.lng) {
+    const parsedLat = Number(params.lat);
+    const parsedLng = Number(params.lng);
+
+    if (
+      params.lat &&
+      params.lng &&
+      !Number.isNaN(parsedLat) &&
+      !Number.isNaN(parsedLng)
+    ) {
       const nextRegion: Region = {
-        latitude: Number(params.lat),
-        longitude: Number(params.lng),
+        latitude: parsedLat,
+        longitude: parsedLng,
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       };
 
       setUserRegion(nextRegion);
-
-      setTimeout(() => {
-        mapRef.current?.animateToRegion(nextRegion, 1000);
-      }, 400);
-
+      mapRef.current?.animateToRegion(nextRegion, 700);
       return;
     }
 
     if (!params.highlight) return;
 
-    const highlightedVendor = [...supabaseVans, ...spottedVans].find(
+    const highlightedVendor = supabaseVans.find(
       (van) => van.id === params.highlight
     );
 
@@ -99,11 +191,60 @@ export default function MapScreen() {
     };
 
     setUserRegion(nextRegion);
+    mapRef.current?.animateToRegion(nextRegion, 700);
+  }, [params.lat, params.lng, params.highlight, supabaseVans]);
 
-    setTimeout(() => {
-      mapRef.current?.animateToRegion(nextRegion, 1000);
-    }, 400);
-  }, [params.lat, params.lng, params.highlight, supabaseVans, spottedVans]);
+  useEffect(() => {
+    if (!selectedVan) {
+      Animated.parallel([
+        Animated.timing(cardOpacity, {
+          toValue: 0,
+          duration: 140,
+          useNativeDriver: true,
+        }),
+        Animated.timing(cardTranslateY, {
+          toValue: 20,
+          duration: 140,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      Animated.spring(selectedMarkerScale, {
+        toValue: 1,
+        useNativeDriver: true,
+        friction: 6,
+        tension: 120,
+      }).start();
+
+      return;
+    }
+
+    selectedMarkerScale.setValue(0.9);
+
+    Animated.spring(selectedMarkerScale, {
+      toValue: 1.12,
+      useNativeDriver: true,
+      friction: 5,
+      tension: 140,
+    }).start();
+
+    cardOpacity.setValue(0);
+    cardTranslateY.setValue(20);
+
+    Animated.parallel([
+      Animated.timing(cardOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.spring(cardTranslateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        friction: 7,
+        tension: 110,
+      }),
+    ]).start();
+  }, [selectedVan, cardOpacity, cardTranslateY, selectedMarkerScale]);
 
   async function requestUserLocation() {
     try {
@@ -133,41 +274,18 @@ export default function MapScreen() {
     try {
       const vendors = await getAllVendors();
       setSupabaseVans(vendors);
-    } catch (error) {
-      console.log(
-        "Error loading vendors:",
-        error instanceof Error ? error.message : "Unknown error"
-      );
+    } catch {
       setSupabaseVans([]);
     }
   }
 
-  async function loadSpottedVans() {
-    try {
-      const stored = await AsyncStorage.getItem(SPOTTED_VANS_KEY);
-      if (!stored) {
-        setSpottedVans([]);
-        return;
-      }
-
-      const parsed: Van[] = JSON.parse(stored);
-      setSpottedVans(parsed);
-    } catch {
-      setSpottedVans([]);
-    }
-  }
-
-  const allVans = useMemo(() => {
-    return [...supabaseVans, ...spottedVans];
-  }, [supabaseVans, spottedVans]);
-
   const filteredVans = useMemo(() => {
     const baseVans =
       selectedFilter === "live"
-        ? allVans.filter((van) => van.isLive && !van.temporary)
+        ? supabaseVans.filter((van) => van.isLive && !van.temporary)
         : selectedFilter === "spotted"
-          ? allVans.filter((van) => van.temporary)
-          : allVans;
+          ? supabaseVans.filter((van) => van.temporary)
+          : supabaseVans;
 
     return [...baseVans].sort((a, b) => {
       const tierRank = { pro: 3, growth: 2, free: 1 };
@@ -181,7 +299,7 @@ export default function MapScreen() {
 
       return b.rating - a.rating;
     });
-  }, [allVans, selectedFilter]);
+  }, [supabaseVans, selectedFilter]);
 
   useEffect(() => {
     if (!selectedVan) return;
@@ -205,7 +323,7 @@ export default function MapScreen() {
         latitudeDelta: 0.02,
         longitudeDelta: 0.02,
       },
-      500
+      400
     );
   }
 
@@ -221,14 +339,25 @@ export default function MapScreen() {
     }
 
     setSelectedVan(null);
+    setSelectedSpotPin(null);
   }
 
-  function startSpotMode() {
+  async function startSpotMode() {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      Alert.alert(
+        "Login required",
+        "Please log in or create an account before spotting a van."
+      );
+      return;
+    }
+
     setSelectedVan(null);
     setSpotMode(true);
     setSelectedSpotPin(null);
 
-    Alert.alert("Choose location", "Tap the map where the burger van is.");
+    Alert.alert("Choose location", "Tap the map where the van is located.");
   }
 
   function cancelSpotFlow() {
@@ -236,27 +365,7 @@ export default function MapScreen() {
     setSpotVisible(false);
     setSpotName("");
     setSpotCuisine("");
-    setSpotPhoto(null);
     setSelectedSpotPin(null);
-  }
-
-  async function pickSpotPhoto() {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert("Permission needed", "Allow photo access.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      quality: 0.7,
-    });
-
-    if (!result.canceled) {
-      setSpotPhoto(result.assets[0].uri);
-    }
   }
 
   async function submitSpotVan() {
@@ -270,6 +379,16 @@ export default function MapScreen() {
       return;
     }
 
+    const user = await getCurrentUser();
+
+    if (!user) {
+      Alert.alert(
+        "Login required",
+        "Please log in or create an account before spotting a van."
+      );
+      return;
+    }
+
     const newVan: Van = {
       id: `spotted-${Date.now()}`,
       name: spotName.trim(),
@@ -278,50 +397,60 @@ export default function MapScreen() {
       lat: selectedSpotPin.latitude,
       lng: selectedSpotPin.longitude,
       temporary: true,
-      photo: spotPhoto,
+      photo: null,
       vendorName: "Community spotted",
-      menu: "Claim this burger van to add menu",
+      menu: "Claim this van to add menu",
       schedule: "Claim to add schedule",
       isLive: false,
       views: 0,
       directions: 0,
+      owner_id: null,
+      subscriptionTier: "free",
+      foodCategories: [],
     };
 
-    const updatedSpottedVans = [newVan, ...spottedVans];
-    setSpottedVans(updatedSpottedVans);
-
     try {
-      await AsyncStorage.setItem(
-        SPOTTED_VANS_KEY,
-        JSON.stringify(updatedSpottedVans)
-      );
-    } catch {
-      Alert.alert("Error", "Could not save spotted van.");
-      return;
-    }
+      await createVendor({
+        id: newVan.id,
+        name: newVan.name,
+        vendorName: newVan.vendorName ?? "Community spotted",
+        cuisine: newVan.cuisine,
+        menu: newVan.menu ?? "Claim this van to add menu",
+        schedule: newVan.schedule ?? "Claim to add schedule",
+        lat: newVan.lat,
+        lng: newVan.lng,
+        photo: null,
+        temporary: true,
+        isLive: false,
+        owner_id: null,
+        views: 0,
+        directions: 0,
+        rating: 0,
+        subscriptionTier: "free",
+        foodCategories: [],
+      });
 
-    cancelSpotFlow();
-    Alert.alert("Success", "Temporary van added to map.");
+      await loadSupabaseVans();
+      cancelSpotFlow();
+      Alert.alert("Success", "Spotted van added to the BiteBeacon map.");
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : "Could not save spotted van."
+      );
+    }
   }
 
   function openVanPage(van: Van) {
-    if (van.temporary) {
-      Alert.alert(
-        "Community spotted van",
-        "This van has not been claimed by a vendor yet."
-      );
-      return;
-    }
-
     router.push({
       pathname: "/vendor/[id]",
-      params: {
-        id: van.id,
-      },
+      params: { id: van.id },
     });
   }
 
   function recenterMap() {
+    setSelectedVan(null);
+    setSelectedSpotPin(null);
     mapRef.current?.animateToRegion(userRegion, 600);
   }
 
@@ -333,39 +462,44 @@ export default function MapScreen() {
           style={styles.map}
           initialRegion={userRegion}
           showsUserLocation
+          showsMyLocationButton={false}
+          customMapStyle={BITEBEACON_MAP_STYLE}
           onPress={handleMapPress}
         >
-          {filteredVans.map((van) => (
-            <Marker
-              key={van.id}
-              coordinate={{ latitude: van.lat, longitude: van.lng }}
-              pinColor={
-                van.temporary
-                  ? "orange"
-                  : van.subscriptionTier === "pro"
-                    ? "#FF7A00"
-                    : getSubscriptionFeatures(van.subscriptionTier).liveStatus
-                      ? van.isLive
-                        ? "green"
-                        : "gray"
-                      : "gray"
-              }
-              title={van.subscriptionTier === "pro" ? `⭐ ${van.name}` : van.name}
-              description={
-                van.temporary
-                  ? "Community spotted van"
-                  : getSubscriptionFeatures(van.subscriptionTier).liveStatus
-                    ? van.isLive
-                      ? `${van.cuisine} • LIVE now`
-                      : `${van.cuisine} • Currently offline`
-                    : van.cuisine
-              }
-              onPress={() => handleMarkerPress(van)}
-            />
-          ))}
+          {filteredVans.map((van) => {
+            const isSelected = selectedVan?.id === van.id;
+
+            return (
+              <Marker
+                key={van.id}
+                coordinate={{ latitude: van.lat, longitude: van.lng }}
+                onPress={() => handleMarkerPress(van)}
+              >
+                <Animated.View
+                  style={
+                    isSelected
+                      ? { transform: [{ scale: selectedMarkerScale }] }
+                      : undefined
+                  }
+                >
+                  <Image
+                    source={getMarkerImage(van)}
+                    style={styles.markerImage}
+                    resizeMode="contain"
+                  />
+                </Animated.View>
+              </Marker>
+            );
+          })}
 
           {selectedSpotPin ? (
-            <Marker coordinate={selectedSpotPin} pinColor="gray" />
+            <Marker coordinate={selectedSpotPin}>
+              <Image
+                source={markerSpotted}
+                style={styles.markerImage}
+                resizeMode="contain"
+              />
+            </Marker>
           ) : null}
         </MapView>
       ) : (
@@ -374,95 +508,167 @@ export default function MapScreen() {
         </View>
       )}
 
-      <View style={styles.filterBar}>
-        <Pressable
-          style={[
-            styles.filterChip,
-            selectedFilter === "all" && styles.filterChipActive,
-          ]}
-          onPress={() => {
-            setSelectedFilter("all");
-            setSelectedVan(null);
-          }}
-        >
-          <Text
+      <View style={styles.topOverlay}>
+        <View style={styles.filterBar}>
+          <Pressable
             style={[
-              styles.filterChipText,
-              selectedFilter === "all" && styles.filterChipTextActive,
+              styles.filterChip,
+              selectedFilter === "all" && styles.filterChipActive,
             ]}
+            onPress={() => {
+              setSelectedFilter("all");
+              setSelectedVan(null);
+            }}
           >
-            All
-          </Text>
-        </Pressable>
+            <Text
+              style={[
+                styles.filterChipText,
+                selectedFilter === "all" && styles.filterChipTextActive,
+              ]}
+            >
+              All
+            </Text>
+          </Pressable>
 
-        <Pressable
-          style={[
-            styles.filterChip,
-            selectedFilter === "live" && styles.filterChipActive,
-          ]}
-          onPress={() => {
-            setSelectedFilter("live");
-            setSelectedVan(null);
-          }}
-        >
-          <Text
+          <Pressable
             style={[
-              styles.filterChipText,
-              selectedFilter === "live" && styles.filterChipTextActive,
+              styles.filterChip,
+              selectedFilter === "live" && styles.filterChipActive,
             ]}
+            onPress={() => {
+              setSelectedFilter("live");
+              setSelectedVan(null);
+            }}
           >
-            Live
-          </Text>
-        </Pressable>
+            <Text
+              style={[
+                styles.filterChipText,
+                selectedFilter === "live" && styles.filterChipTextActive,
+              ]}
+            >
+              Live
+            </Text>
+          </Pressable>
 
-        <Pressable
-          style={[
-            styles.filterChip,
-            selectedFilter === "spotted" && styles.filterChipActive,
-          ]}
-          onPress={() => {
-            setSelectedFilter("spotted");
-            setSelectedVan(null);
-          }}
-        >
-          <Text
+          <Pressable
             style={[
-              styles.filterChipText,
-              selectedFilter === "spotted" && styles.filterChipTextActive,
+              styles.filterChip,
+              selectedFilter === "spotted" && styles.filterChipActive,
             ]}
+            onPress={() => {
+              setSelectedFilter("spotted");
+              setSelectedVan(null);
+            }}
           >
-            Spotted
-          </Text>
-        </Pressable>
+            <Text
+              style={[
+                styles.filterChipText,
+                selectedFilter === "spotted" && styles.filterChipTextActive,
+              ]}
+            >
+              Spotted
+            </Text>
+          </Pressable>
+        </View>
+
+        {!legendOpen ? (
+          <Pressable
+            style={styles.legendButton}
+            onPress={() => setLegendOpen(true)}
+          >
+            <Text style={styles.legendButtonText}>Map Guide</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            style={styles.legendCard}
+            onPress={() => setLegendOpen(false)}
+          >
+            <View style={styles.legendItem}>
+              <Image
+                source={markerFeatured}
+                style={styles.legendMarkerImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.legendText}>Featured</Text>
+            </View>
+
+            <View style={styles.legendItem}>
+              <Image
+                source={markerLive}
+                style={styles.legendMarkerImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.legendText}>Live now</Text>
+            </View>
+
+            <View style={styles.legendItem}>
+              <Image
+                source={markerSpotted}
+                style={styles.legendMarkerImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.legendText}>Community spotted</Text>
+            </View>
+
+            <View style={styles.legendItemLast}>
+              <Image
+                source={markerOffline}
+                style={styles.legendMarkerImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.legendText}>Listed / offline</Text>
+            </View>
+          </Pressable>
+        )}
       </View>
+
+      {spotMode ? (
+        <View style={styles.spotInstructionWrap}>
+          <Text style={styles.spotInstructionTitle}>Spot Mode Active</Text>
+          <Text style={styles.spotInstructionText}>
+            Tap the map to place the van location.
+          </Text>
+        </View>
+      ) : null}
 
       <Pressable style={styles.recenterButton} onPress={recenterMap}>
         <Text style={styles.recenterButtonText}>📍</Text>
       </Pressable>
 
       {selectedVan ? (
-        <View style={styles.bottomCardWrap}>
+        <Animated.View
+          style={[
+            styles.bottomCardWrap,
+            {
+              opacity: cardOpacity,
+              transform: [{ translateY: cardTranslateY }],
+            },
+          ]}
+        >
           <Pressable
             style={styles.bottomCard}
             onPress={() => openVanPage(selectedVan)}
           >
-            {getSubscriptionFeatures(selectedVan.subscriptionTier).images &&
-              selectedVan.photo ? (
-              <Image
-                source={{ uri: selectedVan.photo }}
-                style={styles.bottomCardImage}
-              />
-            ) : null}
-
             <View style={styles.bottomCardTopRow}>
-              <View style={styles.bottomCardTitleRow}>
-                <Text style={styles.bottomCardTitle}>{selectedVan.name}</Text>
+              <View style={styles.bottomCardTitleBlock}>
+                <View style={styles.bottomCardTitleRow}>
+                  <Text style={styles.bottomCardTitle}>{selectedVan.name}</Text>
 
-                {selectedVan.subscriptionTier === "pro" ? (
-                  <View style={styles.bottomCardFeaturedBadge}>
-                    <Text style={styles.bottomCardFeaturedBadgeText}>FEATURED</Text>
-                  </View>
-                ) : null}
+                  {selectedVan.subscriptionTier === "pro" ? (
+                    <View style={styles.bottomCardFeaturedBadge}>
+                      <Text style={styles.bottomCardFeaturedBadgeText}>
+                        FEATURED
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                <Text style={styles.bottomCardMeta}>{selectedVan.cuisine}</Text>
+                <Text style={styles.bottomCardTrustText}>
+                  {selectedVan.temporary
+                    ? "Community spotted listing"
+                    : "Vendor-managed listing"}
+                </Text>
               </View>
 
               <View
@@ -470,58 +676,77 @@ export default function MapScreen() {
                   styles.statusPill,
                   selectedVan.temporary
                     ? styles.statusTemporary
-                    : getSubscriptionFeatures(selectedVan.subscriptionTier).liveStatus
-                      ? selectedVan.isLive
-                        ? styles.statusLive
-                        : styles.statusOffline
-                      : styles.statusOffline,
+                    : selectedVan.isLive
+                      ? styles.statusLive
+                      : selectedVan.subscriptionTier === "pro"
+                        ? styles.statusFeatured
+                        : styles.statusOffline,
                 ]}
               >
-                <Text style={styles.statusPillText}>
-                  {selectedVan.temporary
-                    ? "SPOTTED"
-                    : getSubscriptionFeatures(selectedVan.subscriptionTier).liveStatus
-                      ? selectedVan.isLive
-                        ? "LIVE"
-                        : "OFFLINE"
-                      : "LISTED"}
+                <Text
+                  style={[
+                    styles.statusPillText,
+                    selectedVan.subscriptionTier === "pro" &&
+                    !selectedVan.temporary &&
+                    !selectedVan.isLive &&
+                    styles.statusPillTextFeatured,
+                  ]}
+                >
+                  {getStatusLabel(selectedVan)}
                 </Text>
               </View>
             </View>
 
-            <Text style={styles.bottomCardMeta}>{selectedVan.cuisine}</Text>
+            <View style={styles.bottomCardStatsRow}>
+              <View style={styles.bottomCardStatPill}>
+                <Text style={styles.bottomCardStatLabel}>Rating</Text>
+                <Text style={styles.bottomCardStatValue}>
+                  {selectedVan.rating.toFixed(1)}
+                </Text>
+              </View>
 
-            {selectedVan.vendorName ? (
-              <Text style={styles.bottomCardVendor}>
-                {selectedVan.vendorName}
+              <View style={styles.bottomCardStatPill}>
+                <Text style={styles.bottomCardStatLabel}>Views</Text>
+                <Text style={styles.bottomCardStatValue}>
+                  {selectedVan.views ?? 0}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.bottomCardFooter}>
+              <Text style={styles.bottomCardHint}>
+                {selectedVan.temporary
+                  ? "Tap to learn more about this spotted van"
+                  : "Tap to open vendor details"}
               </Text>
-            ) : null}
 
-            <Text style={styles.bottomCardHint}>
-              {selectedVan.temporary
-                ? "Tap to learn about this spotted van"
-                : "Tap to open vendor details"}
-            </Text>
+              <View style={styles.bottomCardActionPill}>
+                <Text style={styles.bottomCardActionPillText}>Open</Text>
+              </View>
+            </View>
           </Pressable>
-        </View>
+        </Animated.View>
       ) : null}
 
       <View style={styles.buttonWrap}>
-
         <Pressable style={styles.primaryButton} onPress={startSpotMode}>
           <Text style={styles.primaryButtonText}>Spot a Van</Text>
         </Pressable>
       </View>
 
-      <Modal visible={spotVisible} animationType="slide" transparent>
+      {spotVisible ? (
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <ScrollView>
-              <Text style={styles.modalTitle}>Spot a Burger Van</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>Spot a Van</Text>
+              <Text style={styles.modalSubtitle}>
+                Add a temporary spotted van for the community.
+              </Text>
 
               <TextInput
                 style={styles.input}
                 placeholder="Van name"
+                placeholderTextColor="#7A7A7A"
                 value={spotName}
                 onChangeText={setSpotName}
               />
@@ -529,17 +754,10 @@ export default function MapScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Cuisine"
+                placeholderTextColor="#7A7A7A"
                 value={spotCuisine}
                 onChangeText={setSpotCuisine}
               />
-
-              <Pressable style={styles.secondaryButton} onPress={pickSpotPhoto}>
-                <Text style={styles.secondaryButtonText}>Choose Photo</Text>
-              </Pressable>
-
-              {spotPhoto ? (
-                <Image source={{ uri: spotPhoto }} style={styles.previewImage} />
-              ) : null}
 
               <Pressable style={styles.primaryButton} onPress={submitSpotVan}>
                 <Text style={styles.primaryButtonText}>Submit Listing</Text>
@@ -551,76 +769,185 @@ export default function MapScreen() {
             </ScrollView>
           </View>
         </View>
-      </Modal>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  map: { flex: 1 },
+  container: {
+    flex: 1,
+    backgroundColor: "#0B2A5B",
+  },
+
+  map: {
+    flex: 1,
+  },
+
+  markerImage: {
+    width: 40,
+    height: 52,
+  },
+
+  legendMarkerImage: {
+    width: 36,
+    height: 48,
+  },
 
   loadingWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#0B2A5B",
   },
 
   loadingText: {
     fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+
+  topOverlay: {
+    position: "absolute",
+    top: 56,
+    left: 16,
+    right: 16,
+    zIndex: 10,
+  },
+
+  filterBar: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 10,
+  },
+
+  filterChip: {
+    backgroundColor: "rgba(255,255,255,0.96)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,122,0,0.35)",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+
+  filterChipActive: {
+    backgroundColor: "#0B2A5B",
+    borderColor: "#FF7A00",
+  },
+
+  filterChipText: {
+    color: "#0B2A5B",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+
+  filterChipTextActive: {
+    color: "#FFFFFF",
+  },
+
+  legendButton: {
+    alignSelf: "flex-start",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1.5,
+    borderColor: "#FF7A00",
+  },
+
+  legendButtonText: {
+    color: "#0B2A5B",
+    fontWeight: "800",
+    fontSize: 12,
+  },
+
+  legendCard: {
+    alignSelf: "flex-start",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderWidth: 1.5,
+    borderColor: "#FF7A00",
+  },
+
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 2,
+  },
+
+  legendItemLast: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  legendText: {
+    color: "#0B2A5B",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+
+  spotInstructionWrap: {
+    position: "absolute",
+    top: 164,
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(11,42,91,0.96)",
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+
+  spotInstructionTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginBottom: 4,
+  },
+
+  spotInstructionText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: "rgba(255,255,255,0.82)",
     fontWeight: "600",
   },
 
   recenterButton: {
     position: "absolute",
-    right: 20,
-    bottom: 170,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    right: 16,
+    bottom: 218,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
-    elevation: 6,
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
 
   recenterButtonText: {
-    fontSize: 22,
-  },
-
-  bottomCardWrap: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 100,
-  },
-
-  bottomCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 16,
-  },
-
-  bottomCardImage: {
-    width: "100%",
-    height: 140,
-    borderRadius: 16,
-    marginBottom: 8,
-  },
-
-  bottomCardTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-  },
-
-  bottomCardMeta: {
-    fontSize: 14,
-    color: "#666",
-  },
-
-  bottomCardHint: {
-    marginTop: 6,
-    fontWeight: "700",
+    fontSize: 20,
   },
 
   buttonWrap: {
@@ -633,133 +960,111 @@ const styles = StyleSheet.create({
 
   primaryButton: {
     backgroundColor: "#0B2A5B",
-    paddingVertical: 14,
+    paddingVertical: 15,
     borderRadius: 16,
     alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+    shadowColor: "#000",
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
 
   primaryButtonText: {
     color: "#FFFFFF",
-    fontWeight: "700",
-  },
-
-  secondaryActionButton: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#0B2A5B",
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-  },
-
-  secondaryActionButtonText: {
-    color: "#0B2A5B",
-    fontWeight: "700",
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    justifyContent: "flex-end",
-  },
-
-  modalCard: {
-    backgroundColor: "#F7F4F2",
-    padding: 20,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-
-  modalTitle: {
-    fontSize: 22,
     fontWeight: "800",
-    marginBottom: 12,
+    fontSize: 16,
   },
 
-  input: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#D9D9D9",
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 12,
+  bottomCardWrap: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 100,
   },
 
-  previewImage: {
-    width: "100%",
-    height: 160,
-    borderRadius: 16,
-    marginBottom: 12,
-  },
-
-  secondaryButton: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#0B2A5B",
-    paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: "center",
-    marginBottom: 12,
-  },
-
-  secondaryButtonText: {
-    color: "#0B2A5B",
-    fontWeight: "700",
-  },
-
-  cancelButton: {
-    backgroundColor: "#D9D9D9",
-    paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: "center",
-  },
-
-  cancelButtonText: {
-    fontWeight: "700",
-  },
-  bottomCardTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    flex: 1,
-  },
-
-  bottomCardFeaturedBadge: {
-    backgroundColor: "#FF7A00",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-
-  bottomCardFeaturedBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "800",
+  bottomCard: {
+    backgroundColor: "rgba(11,42,91,0.96)",
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+    shadowColor: "#000",
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
   },
 
   bottomCardTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    gap: 10,
+    gap: 12,
+    marginBottom: 12,
   },
 
-  bottomCardVendor: {
-    fontSize: 14,
-    color: "#444",
-    marginTop: 4,
+  bottomCardTitleBlock: {
+    flex: 1,
+  },
+
+  bottomCardTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 6,
+  },
+
+  bottomCardTitle: {
+    fontSize: 21,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+
+  bottomCardFeaturedBadge: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+
+  bottomCardFeaturedBadgeText: {
+    color: "#FF7A00",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  bottomCardMeta: {
+    fontSize: 15,
+    color: "rgba(255,255,255,0.88)",
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+
+  bottomCardTrustText: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.68)",
+    fontWeight: "700",
   },
 
   statusPill: {
+    alignSelf: "flex-start",
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 7,
     borderRadius: 999,
   },
 
   statusPillText: {
     color: "#FFFFFF",
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
+  },
+
+  statusPillTextFeatured: {
+    color: "#0B2A5B",
   },
 
   statusLive: {
@@ -773,33 +1078,123 @@ const styles = StyleSheet.create({
   statusTemporary: {
     backgroundColor: "#FF7A00",
   },
-  filterBar: {
-    position: "absolute",
-    top: 60,
-    left: 16,
-    right: 16,
+
+  statusFeatured: {
+    backgroundColor: "#FFFFFF",
+  },
+
+  bottomCardStatsRow: {
     flexDirection: "row",
+    justifyContent: "center",
     gap: 10,
-    zIndex: 10,
+    marginBottom: 12,
   },
 
-  filterChip: {
-    backgroundColor: "rgba(255,255,255,0.92)",
-    paddingHorizontal: 14,
+  bottomCardStatPill: {
+    width: "46%",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 16,
     paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
   },
 
-  filterChipActive: {
-    backgroundColor: "#0B2A5B",
+  bottomCardStatLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.68)",
+    textTransform: "uppercase",
+    marginBottom: 4,
   },
 
-  filterChipText: {
-    color: "#0B2A5B",
+  bottomCardStatValue: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+
+  bottomCardFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  bottomCardHint: {
+    flex: 1,
+    color: "#FFFFFF",
+    fontSize: 13,
     fontWeight: "700",
   },
 
-  filterChipTextActive: {
-    color: "#FFFFFF",
+  bottomCardActionPill: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+
+  bottomCardActionPillText: {
+    color: "#0B2A5B",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  modalOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    paddingTop: 40,
+  },
+
+  modalCard: {
+    backgroundColor: "#FFFFFF",
+    padding: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,122,0,0.35)",
+  },
+
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#0B2A5B",
+    marginBottom: 6,
+  },
+
+  modalSubtitle: {
+    fontSize: 14,
+    color: "#5F6368",
+    lineHeight: 20,
+    marginBottom: 14,
+    fontWeight: "600",
+  },
+
+  input: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+    color: "#1F1F1F",
+  },
+
+  cancelButton: {
+    backgroundColor: "#EEF2F7",
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+  },
+
+  cancelButtonText: {
+    color: "#0B2A5B",
+    fontWeight: "700",
+    fontSize: 15,
   },
 });

@@ -196,6 +196,26 @@ export default function HomeScreen() {
         return a.isLive ? -1 : 1;
       }
 
+      if (userLocation) {
+        const distanceA = getDistanceMiles(
+          userLocation.latitude,
+          userLocation.longitude,
+          a.lat,
+          a.lng
+        );
+
+        const distanceB = getDistanceMiles(
+          userLocation.latitude,
+          userLocation.longitude,
+          b.lat,
+          b.lng
+        );
+
+        if (Math.abs(distanceA - distanceB) > 0.05) {
+          return distanceA - distanceB;
+        }
+      }
+
       if (aRank !== bRank) {
         return bRank - aRank;
       }
@@ -208,7 +228,7 @@ export default function HomeScreen() {
     });
 
     return sortedVans;
-  }, [allVans, selectedFilter, selectedFoodCategory]);
+  }, [allVans, selectedFilter, selectedFoodCategory, userLocation]);
 
   const liveNowVans = useMemo(() => {
     return [...allVans]
@@ -221,6 +241,26 @@ export default function HomeScreen() {
         const aRank = tierRank[a.subscriptionTier ?? "free"];
         const bRank = tierRank[b.subscriptionTier ?? "free"];
 
+        if (userLocation) {
+          const distanceA = getDistanceMiles(
+            userLocation.latitude,
+            userLocation.longitude,
+            a.lat,
+            a.lng
+          );
+
+          const distanceB = getDistanceMiles(
+            userLocation.latitude,
+            userLocation.longitude,
+            b.lat,
+            b.lng
+          );
+
+          if (Math.abs(distanceA - distanceB) > 0.05) {
+            return distanceA - distanceB;
+          }
+        }
+
         if (aRank !== bRank) {
           return bRank - aRank;
         }
@@ -228,14 +268,36 @@ export default function HomeScreen() {
         return b.rating - a.rating;
       })
       .slice(0, 6);
-  }, [allVans]);
+  }, [allVans, userLocation]);
 
   const featuredProVans = useMemo(() => {
     return [...allVans]
       .filter((van) => van.subscriptionTier === "pro")
-      .sort((a, b) => b.rating - a.rating)
+      .sort((a, b) => {
+        if (userLocation) {
+          const distanceA = getDistanceMiles(
+            userLocation.latitude,
+            userLocation.longitude,
+            a.lat,
+            a.lng
+          );
+
+          const distanceB = getDistanceMiles(
+            userLocation.latitude,
+            userLocation.longitude,
+            b.lat,
+            b.lng
+          );
+
+          if (Math.abs(distanceA - distanceB) > 0.05) {
+            return distanceA - distanceB;
+          }
+        }
+
+        return b.rating - a.rating;
+      })
       .slice(0, 4);
-  }, [allVans]);
+  }, [allVans, userLocation]);
 
   function getVendorDistance(van: Van) {
     if (!userLocation) return null;
@@ -453,7 +515,7 @@ export default function HomeScreen() {
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>All Vendors Nearby</Text>
               <Text style={styles.sectionSubtitle}>
-                Ranked by tier, quality, and availability
+                Ranked by distance, tier, quality, and availability
               </Text>
             </View>
           </>
@@ -717,6 +779,7 @@ const styles = StyleSheet.create({
   foodCategoryCardTextActive: {
     color: "rgba(255,255,255,0.92)",
   },
+
   aboutSection: {
     marginBottom: 26,
   },
@@ -740,6 +803,7 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.6)",
     fontStyle: "italic",
   },
+
   aboutDivider: {
     height: 2,
     width: 120,

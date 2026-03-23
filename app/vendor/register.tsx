@@ -12,6 +12,7 @@ import {
 import { getCurrentUser } from "../../services/authService";
 import { createVendor, getVendorByOwnerId } from "../../services/vendorService";
 import { type Van } from "../../types/van";
+
 const FOOD_CATEGORY_OPTIONS = [
   "Burgers",
   "Smash Burgers",
@@ -21,6 +22,7 @@ const FOOD_CATEGORY_OPTIONS = [
   "Desserts",
   "Coffee",
 ];
+
 export default function RegisterVendorScreen() {
   const params = useLocalSearchParams();
 
@@ -44,7 +46,10 @@ export default function RegisterVendorScreen() {
     }
   });
 
-  const hasSelectedLocation = !!params.lat && !!params.lng;
+  const parsedLat = Number(params.lat);
+  const parsedLng = Number(params.lng);
+  const hasSelectedLocation =
+    !Number.isNaN(parsedLat) && !Number.isNaN(parsedLng);
 
   function toggleFoodCategory(category: string) {
     setFoodCategories((current) =>
@@ -53,8 +58,10 @@ export default function RegisterVendorScreen() {
         : [...current, category]
     );
   }
+
   async function handleRegister() {
     if (isSubmitting) return;
+
     setIsSubmitting(true);
 
     try {
@@ -66,21 +73,13 @@ export default function RegisterVendorScreen() {
         return;
       }
 
-      if (!params.lat || !params.lng) {
+      if (!hasSelectedLocation) {
         Alert.alert("Location required", "Please choose a location on the map.");
         return;
       }
 
-      const lat = Number(params.lat);
-      const lng = Number(params.lng);
-
-      if (Number.isNaN(lat) || Number.isNaN(lng)) {
-        Alert.alert(
-          "Invalid coordinates",
-          "Please enter valid latitude and longitude values."
-        );
-        return;
-      }
+      const lat = parsedLat;
+      const lng = parsedLng;
 
       const user = await getCurrentUser();
 
@@ -162,6 +161,7 @@ export default function RegisterVendorScreen() {
       setIsSubmitting(false);
     }
   }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>
@@ -228,6 +228,7 @@ export default function RegisterVendorScreen() {
           onChangeText={setSchedule}
           multiline
         />
+
         <Text style={styles.label}>Food categories</Text>
         <View style={styles.checkboxGroup}>
           {FOOD_CATEGORY_OPTIONS.map((category) => {
@@ -248,7 +249,8 @@ export default function RegisterVendorScreen() {
                     isSelected && styles.checkboxChipTextSelected,
                   ]}
                 >
-                  {isSelected ? "✓ " : ""}{category}
+                  {isSelected ? "✓ " : ""}
+                  {category}
                 </Text>
               </Pressable>
             );
@@ -319,7 +321,7 @@ export default function RegisterVendorScreen() {
               : "Create Vendor Listing"}
         </Text>
       </Pressable>
-      
+
       <Pressable style={styles.secondaryButton} onPress={() => router.back()}>
         <Text style={styles.secondaryButtonText}>Cancel</Text>
       </Pressable>
@@ -385,8 +387,8 @@ const styles = StyleSheet.create({
 
   input: {
     backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#D9D9D9",
+    borderWidth: 2,
+    borderColor: "#FF7A00",
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -453,6 +455,22 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
+  claimExistingButton: {
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: "#0B2A5B",
+  },
+
+  claimExistingButtonText: {
+    color: "#0B2A5B",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
   secondaryButton: {
     backgroundColor: "#D9D9D9",
     paddingVertical: 14,
@@ -465,6 +483,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
+
   checkboxGroup: {
     flexDirection: "row",
     flexWrap: "wrap",

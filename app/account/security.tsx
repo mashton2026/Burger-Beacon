@@ -1,0 +1,278 @@
+import { router } from "expo-router";
+import { useEffect, useState } from "react";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+} from "react-native";
+import { theme } from "../../constants/theme";
+import { supabase } from "../../lib/supabase";
+import { getCurrentUser } from "../../services/authService";
+
+export default function SecurityScreen() {
+  const [currentEmail, setCurrentEmail] = useState<string | null>(null);
+  const [newEmail, setNewEmail] = useState<string>("");
+  const [newPassword, setNewPassword] = useState<string>("");
+  const [confirmPassword, setConfirmPassword] = useState<string>("");
+  const [isUpdatingEmail, setIsUpdatingEmail] = useState<boolean>(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState<boolean>(false);
+
+  useEffect(() => {
+    loadUser();
+  }, []);
+
+  async function loadUser(): Promise<void> {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      setCurrentEmail(null);
+      setNewEmail("");
+      return;
+    }
+
+    setCurrentEmail(user.email ?? null);
+    setNewEmail(user.email ?? "");
+  }
+
+  async function handleUpdateEmail(): Promise<void> {
+    if (!currentEmail) {
+      Alert.alert("No account loaded", "Please log in to update your email.");
+      return;
+    }
+
+    if (!newEmail.trim()) {
+      Alert.alert("Missing email", "Please enter your new email address.");
+      return;
+    }
+
+    if (newEmail.trim().toLowerCase() === currentEmail.trim().toLowerCase()) {
+      Alert.alert("No changes made", "Please enter a different email address.");
+      return;
+    }
+
+    setIsUpdatingEmail(true);
+
+    try {
+      const result = await supabase.auth.updateUser({
+        email: newEmail.trim(),
+      });
+
+      if (result.error) {
+        Alert.alert("Email update failed", result.error.message);
+        return;
+      }
+
+      setCurrentEmail(newEmail.trim());
+
+      Alert.alert(
+        "Email update requested",
+        "Check your inbox if confirmation is required."
+      );
+    } catch (error) {
+      Alert.alert(
+        "Email update failed",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    } finally {
+      setIsUpdatingEmail(false);
+    }
+  }
+
+  async function handleUpdatePassword(): Promise<void> {
+    if (!currentEmail) {
+      Alert.alert("No account loaded", "Please log in to update your password.");
+      return;
+    }
+
+    if (!newPassword.trim() || !confirmPassword.trim()) {
+      Alert.alert("Missing password", "Please fill in both password fields.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      Alert.alert("Password mismatch", "The passwords do not match.");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      Alert.alert("Password too short", "Use at least 6 characters.");
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+
+    try {
+      const result = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (result.error) {
+        Alert.alert("Password update failed", result.error.message);
+        return;
+      }
+
+      setNewPassword("");
+      setConfirmPassword("");
+
+      Alert.alert("Password updated", "Your password has been changed.");
+    } catch (error) {
+      Alert.alert(
+        "Password update failed",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  }
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Text style={styles.kicker}>SECURITY</Text>
+      <Text style={styles.title}>Login & Security</Text>
+      <Text style={styles.subtitle}>
+        Update the email and password connected to your BiteBeacon account.
+      </Text>
+
+      <Text style={styles.sectionTitle}>Email Address</Text>
+      <Text style={styles.helperText}>
+        Current: {currentEmail ?? "No account loaded"}
+      </Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="Enter new email"
+        placeholderTextColor="#7A7A7A"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        value={newEmail}
+        onChangeText={setNewEmail}
+      />
+
+      <Pressable
+        style={styles.primaryButton}
+        onPress={handleUpdateEmail}
+        disabled={isUpdatingEmail}
+      >
+        <Text style={styles.primaryButtonText}>
+          {isUpdatingEmail ? "Updating..." : "Update Email"}
+        </Text>
+      </Pressable>
+
+      <Text style={styles.sectionTitle}>Password</Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="New password"
+        placeholderTextColor="#7A7A7A"
+        secureTextEntry
+        value={newPassword}
+        onChangeText={setNewPassword}
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Confirm password"
+        placeholderTextColor="#7A7A7A"
+        secureTextEntry
+        value={confirmPassword}
+        onChangeText={setConfirmPassword}
+      />
+
+      <Pressable
+        style={styles.primaryButton}
+        onPress={handleUpdatePassword}
+        disabled={isUpdatingPassword}
+      >
+        <Text style={styles.primaryButtonText}>
+          {isUpdatingPassword ? "Updating..." : "Update Password"}
+        </Text>
+      </Pressable>
+
+      <Pressable style={styles.backButton} onPress={() => router.back()}>
+        <Text style={styles.backButtonText}>Back</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+
+  content: {
+    padding: 24,
+    paddingBottom: 40,
+  },
+
+  kicker: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.colors.secondary,
+    marginBottom: 8,
+  },
+
+  title: {
+    fontSize: 30,
+    fontWeight: "800",
+    color: theme.colors.textOnDark,
+    marginBottom: 8,
+  },
+
+  subtitle: {
+    fontSize: 15,
+    color: "rgba(255,255,255,0.75)",
+    marginBottom: 24,
+  },
+
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginBottom: 10,
+    marginTop: 16,
+  },
+
+  helperText: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.6)",
+    marginBottom: 10,
+  },
+
+  input: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+  },
+
+  primaryButton: {
+    backgroundColor: theme.colors.primary,
+    padding: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    marginBottom: 8,
+  },
+
+  primaryButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+  },
+
+  backButton: {
+    marginTop: 20,
+    backgroundColor: "#D9D9D9",
+    padding: 14,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+
+  backButtonText: {
+    color: "#222222",
+    fontWeight: "700",
+  },
+});

@@ -80,6 +80,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
     position: "relative",
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
 
   cardPressed: {
@@ -91,7 +93,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 10,
     right: 10,
-    backgroundColor: "#FF7A00",
+    backgroundColor: theme.colors.primary,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
@@ -99,7 +101,7 @@ const styles = StyleSheet.create({
   },
 
   featuredBadgeText: {
-    color: "#FFFFFF",
+    color: theme.colors.textOnDark,
     fontSize: 10,
     fontWeight: "800",
   },
@@ -108,7 +110,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 38,
     right: 10,
-    backgroundColor: "#1DB954",
+    backgroundColor: theme.colors.success,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
@@ -116,7 +118,7 @@ const styles = StyleSheet.create({
   },
 
   dealBadgeText: {
-    color: "#FFFFFF",
+    color: theme.colors.textOnDark,
     fontSize: 10,
     fontWeight: "800",
   },
@@ -125,7 +127,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 10,
     right: 10,
-    backgroundColor: "#0B2A5B",
+    backgroundColor: theme.colors.background,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
@@ -133,7 +135,7 @@ const styles = StyleSheet.create({
   },
 
   growthBadgeText: {
-    color: "#FFFFFF",
+    color: theme.colors.textOnDark,
     fontSize: 10,
     fontWeight: "800",
   },
@@ -189,6 +191,6 @@ const styles = StyleSheet.create({
   distance: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#0B2A5B",
+    color: theme.colors.background,
   },
 });

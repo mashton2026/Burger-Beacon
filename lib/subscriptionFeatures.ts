@@ -24,6 +24,7 @@ const subscriptionFeatureMap: Record<SubscriptionTier, SubscriptionFeatures> = {
     featuredBadge: false,
     trendingBoost: false,
   },
+
   growth: {
     images: true,
     liveStatus: true,
@@ -35,6 +36,7 @@ const subscriptionFeatureMap: Record<SubscriptionTier, SubscriptionFeatures> = {
     featuredBadge: false,
     trendingBoost: false,
   },
+
   pro: {
     images: true,
     liveStatus: true,

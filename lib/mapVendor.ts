@@ -9,9 +9,12 @@ type VendorRow = {
   cuisine?: string | null;
   temporary?: boolean | null;
   photo?: string | null;
+  photos?: string[] | null;
   vendor_name?: string | null;
   menu?: string | null;
   schedule?: string | null;
+  menu_pdf_url?: string | null;
+  menu_pdf_name?: string | null;
   vendor_message?: string | null;
   is_live?: boolean | null;
   views?: number | null;
@@ -31,9 +34,12 @@ export function mapVendorRowToVan(row: VendorRow): Van {
     cuisine: row.cuisine ?? "",
     temporary: row.temporary ?? false,
     photo: row.photo ?? null,
+    photos: row.photos ?? (row.photo ? [row.photo] : []),
     vendorName: row.vendor_name ?? "",
     menu: row.menu ?? "",
     schedule: row.schedule ?? "",
+    menuPdfUrl: row.menu_pdf_url ?? null,
+    menuPdfName: row.menu_pdf_name ?? null,
     vendorMessage: row.vendor_message ?? "",
     isLive: row.is_live ?? false,
     views: row.views ?? 0,

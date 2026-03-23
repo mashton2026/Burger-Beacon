@@ -9,6 +9,9 @@ export type Van = {
   cuisine: string;
   temporary?: boolean;
   photo?: string | null;
+  photos?: string[];
+  menuPdfUrl?: string | null;
+  menuPdfName?: string | null;
   vendorName?: string;
   menu?: string;
   schedule?: string;

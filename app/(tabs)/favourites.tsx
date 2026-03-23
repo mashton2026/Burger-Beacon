@@ -87,16 +87,16 @@ export default function FavouritesScreen() {
               {loading
                 ? "Loading favourites..."
                 : isGuest
-                ? "Save favourites with an account"
-                : "No favourites yet"}
+                  ? "Save favourites with an account"
+                  : "No favourites saved yet"}
             </Text>
 
             <Text style={styles.emptyStateText}>
               {loading
                 ? "Please wait while we load your saved vendors."
                 : isGuest
-                ? "Log in or create an account to save vendors and access them here any time."
-                : "When you save a vendor from its page, it will appear here."}
+                  ? "Log in or create an account to save vendors and find them here any time."
+                  : "When you save a vendor from its page, it will appear here."}
             </Text>
 
             {!loading && isGuest ? (
