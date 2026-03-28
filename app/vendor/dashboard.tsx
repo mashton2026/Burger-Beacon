@@ -14,14 +14,17 @@ import {
   TextInput,
   View,
 } from "react-native";
+import MapView, { Marker } from "react-native-maps";
 import { getSubscriptionFeatures } from "../../lib/subscriptionFeatures";
 import { supabase } from "../../lib/supabase";
 import {
   getCurrentUser,
+  getCurrentUserVendor,
   signOutCurrentUser,
 } from "../../services/authService";
 import {
   getVendorMenuPdfSignedUrl,
+  uploadVendorLogo,
   uploadVendorMenuPdf,
   uploadVendorPhotos,
 } from "../../services/storageService";
@@ -29,27 +32,280 @@ import {
   getMyVendorClaims,
   type VendorClaim,
 } from "../../services/vendorClaimService";
-import { getVendorById, getVendorByOwnerId } from "../../services/vendorService";
+import { getVendorByOwnerId } from "../../services/vendorService";
 import { type Van } from "../../types/van";
 
 type AssetAwareVan = Van & {
   photos?: string[];
   menuPdfUrl?: string | null;
   menuPdfName?: string | null;
+  logoUrl?: string | null;
+  logoPath?: string | null;
+};
+
+type InsightPoint = {
+  day?: string;
+  hour?: number;
+  total: number;
+};
+
+type AdvancedInsights = {
+  views: number;
+  directions: number;
+  conversion_rate: number;
+  daily_views: InsightPoint[];
+  peak_hours: InsightPoint[];
+};
+
+type HeatmapPoint = {
+  lat: number;
+  lng: number;
+  weight: number;
 };
 
 const FOOD_CATEGORY_OPTIONS = [
   "Burgers",
   "Smash Burgers",
+  "Fries",
+  "Loaded Fries",
+  "Hot Dogs",
   "BBQ",
+  "Fried Chicken",
+  "Pizza",
+  "Tacos",
+  "Mexican",
+  "Sandwiches",
+  "Wraps",
+  "Kebabs",
+  "Asian",
+  "Indian",
+  "Caribbean",
+  "Seafood",
   "Vegan",
   "Vegetarian",
   "Desserts",
+  "Ice Cream",
+  "Donuts",
+  "Cakes",
   "Coffee",
+  "Drinks",
+  "Breakfast",
 ];
 
 function isLocalFileUri(uri: string) {
   return /^(file|content|ph|asset|assets-library):/i.test(uri);
+}
+
+function getPeakHourLabel(hour: number) {
+  const safeHour = Number.isFinite(hour) ? hour : 0;
+  const suffix = safeHour >= 12 ? "PM" : "AM";
+  const normalized = safeHour % 12 || 12;
+  return `${normalized}${suffix}`;
+}
+
+function formatShortDayLabel(dateString: string) {
+  const date = new Date(`${dateString}T00:00:00`);
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function buildLast30DaysViews(points: InsightPoint[]) {
+  const totalsByDay = new Map<string, number>();
+
+  points.forEach((point) => {
+    if (!point.day) return;
+    totalsByDay.set(point.day, point.total ?? 0);
+  });
+
+  const days: { day: string; shortLabel: string; total: number }[] = [];
+
+  for (let index = 29; index >= 0; index -= 1) {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - index);
+
+    const isoDay = date.toISOString().slice(0, 10);
+
+    days.push({
+      day: isoDay,
+      shortLabel: formatShortDayLabel(isoDay),
+      total: totalsByDay.get(isoDay) ?? 0,
+    });
+  }
+
+  return days;
+}
+
+function build24HourBuckets(points: InsightPoint[]) {
+  const totalsByHour = new Map<number, number>();
+
+  points.forEach((point) => {
+    const safeHour = Number(point.hour);
+    if (!Number.isInteger(safeHour) || safeHour < 0 || safeHour > 23) return;
+    totalsByHour.set(safeHour, point.total ?? 0);
+  });
+
+  return Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    label: getPeakHourLabel(hour),
+    shortLabel: hour % 6 === 0 ? getPeakHourLabel(hour) : "",
+    total: totalsByHour.get(hour) ?? 0,
+  }));
+}
+
+function TrendsMiniChart({
+  title,
+  subtitle,
+  points,
+}: {
+  title: string;
+  subtitle: string;
+  points: InsightPoint[];
+}) {
+  const chartData = buildLast30DaysViews(points);
+  const maxTotal = Math.max(...chartData.map((item) => item.total), 1);
+  const hasData = chartData.some((item) => item.total > 0);
+
+  return (
+    <View style={styles.insightCard}>
+      <Text style={styles.insightCardTitle}>{title}</Text>
+      <Text style={styles.insightCardSubtitle}>{subtitle}</Text>
+
+      {!hasData ? (
+        <View style={styles.emptyInlineCard}>
+          <Text style={styles.emptyInlineTitle}>No trend data yet</Text>
+          <Text style={styles.emptyInlineText}>
+            Daily activity will appear here once customers start engaging with your listing.
+          </Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.trendChart}>
+            {chartData.map((item) => {
+              const height = Math.max(
+                (item.total / maxTotal) * 120,
+                item.total > 0 ? 8 : 4
+              );
+
+              return (
+                <View key={item.day} style={styles.trendBarWrap}>
+                  <View style={styles.trendBarTrack}>
+                    <View style={[styles.trendBarFill, { height }]} />
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={styles.trendAxisRow}>
+            <Text style={styles.trendAxisLabel}>
+              {chartData[0]?.shortLabel}
+            </Text>
+            <Text style={styles.trendAxisLabel}>
+              {chartData[14]?.shortLabel}
+            </Text>
+            <Text style={styles.trendAxisLabel}>
+              {chartData[29]?.shortLabel}
+            </Text>
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
+function PeakHoursChart({
+  title,
+  subtitle,
+  points,
+}: {
+  title: string;
+  subtitle: string;
+  points: InsightPoint[];
+}) {
+  const chartData = build24HourBuckets(points);
+  const maxTotal = Math.max(...chartData.map((item) => item.total), 1);
+  const hasData = chartData.some((item) => item.total > 0);
+
+  return (
+    <View style={styles.insightCard}>
+      <Text style={styles.insightCardTitle}>{title}</Text>
+      <Text style={styles.insightCardSubtitle}>{subtitle}</Text>
+
+      {!hasData ? (
+        <View style={styles.emptyInlineCard}>
+          <Text style={styles.emptyInlineTitle}>No peak hour data yet</Text>
+          <Text style={styles.emptyInlineText}>
+            Hourly engagement will appear here once more customer activity is recorded.
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.hourChart}>
+          {chartData.map((item) => {
+            const height = Math.max(
+              (item.total / maxTotal) * 120,
+              item.total > 0 ? 8 : 4
+            );
+
+            return (
+              <View key={item.hour} style={styles.hourBarWrap}>
+                <View style={styles.hourBarTrack}>
+                  <View style={[styles.hourBarFill, { height }]} />
+                </View>
+
+                {item.shortLabel ? (
+                  <Text style={styles.hourAxisLabel}>
+                    {item.shortLabel}
+                  </Text>
+                ) : (
+                  <View style={styles.hourAxisSpacer} />
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function TierExplanationCard({
+  title,
+  subtitle,
+  isExpanded,
+  onToggle,
+  accent,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+  accent: "free" | "growth" | "pro";
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      style={[
+        styles.tierExplainCard,
+        accent === "growth" && styles.tierExplainCardGrowth,
+        accent === "pro" && styles.tierExplainCardPro,
+      ]}
+    >
+      <Pressable style={styles.tierExplainHeader} onPress={onToggle}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.tierExplainTitle}>{title}</Text>
+          <Text style={styles.tierExplainSubtitle}>{subtitle}</Text>
+        </View>
+
+        <Text style={styles.tierExplainToggle}>{isExpanded ? "−" : "+"}</Text>
+      </Pressable>
+
+      {isExpanded ? <View style={styles.tierExplainBody}>{children}</View> : null}
+    </View>
+  );
 }
 
 export default function VendorDashboardScreen() {
@@ -71,7 +327,10 @@ export default function VendorDashboardScreen() {
   const [vendorMessage, setVendorMessage] = useState("");
   const [isLive, setIsLive] = useState(false);
   const [foodCategories, setFoodCategories] = useState<string[]>([]);
+  const [foodCategorySearch, setFoodCategorySearch] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
+  const [logoUri, setLogoUri] = useState<string | null>(null);
+  const [logoPath, setLogoPath] = useState<string | null>(null);
   const [menuPdfName, setMenuPdfName] = useState<string | null>(null);
   const [menuPdfUri, setMenuPdfUri] = useState<string | null>(null);
   const [menuPdfStoragePath, setMenuPdfStoragePath] = useState<string | null>(
@@ -81,6 +340,28 @@ export default function VendorDashboardScreen() {
   const [lng, setLng] = useState<number>(0);
   const [editSectionY, setEditSectionY] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [insights, setInsights] = useState<AdvancedInsights | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [heatmapPoints, setHeatmapPoints] = useState<HeatmapPoint[]>([]);
+  const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [expandedTier, setExpandedTier] = useState<"free" | "growth" | "pro">(
+    "growth"
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      async function checkAccess() {
+        const vendor = await getCurrentUserVendor();
+
+        if (!vendor) {
+          router.replace("/vendor/register");
+          return;
+        }
+      }
+
+      checkAccess();
+    }, [])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -94,10 +375,14 @@ export default function VendorDashboardScreen() {
     if (typeof params.cuisine === "string") setCuisine(params.cuisine);
     if (typeof params.menu === "string") setMenu(params.menu);
     if (typeof params.schedule === "string") setSchedule(params.schedule);
+
     if (typeof params.vendorMessage === "string") {
       setVendorMessage(params.vendorMessage);
     }
-    if (typeof params.isLive === "string") setIsLive(params.isLive === "true");
+
+    if (typeof params.isLive === "string") {
+      setIsLive(params.isLive === "true");
+    }
 
     if (params.lat && params.lng) {
       const nextLat = Number(params.lat);
@@ -134,44 +419,105 @@ export default function VendorDashboardScreen() {
     params.lng,
   ]);
 
+  async function loadAdvancedInsights(vendorId: string, tier: string) {
+    if (tier !== "pro") {
+      setInsights(null);
+      return;
+    }
+
+    setInsightsLoading(true);
+
+    try {
+      const { data, error } = await supabase.rpc("get_vendor_advanced_insights", {
+        p_vendor_id: vendorId,
+        p_days: 30,
+      });
+
+      if (error) {
+        setInsights(null);
+        return;
+      }
+
+      setInsights(
+        (data as AdvancedInsights) ?? {
+          views: 0,
+          directions: 0,
+          conversion_rate: 0,
+          daily_views: [],
+          peak_hours: [],
+        }
+      );
+    } finally {
+      setInsightsLoading(false);
+    }
+  }
+
+  async function loadHeatmapPoints(vendorId: string, tier: string) {
+    if (tier !== "pro") {
+      setHeatmapPoints([]);
+      return;
+    }
+
+    setHeatmapLoading(true);
+
+    try {
+      const { data, error } = await supabase.rpc("get_vendor_heatmap_points", {
+        p_vendor_id: vendorId,
+        p_days: 30,
+      });
+
+      if (error) {
+        setHeatmapPoints([]);
+        return;
+      }
+
+      setHeatmapPoints((data as HeatmapPoint[]) ?? []);
+    } finally {
+      setHeatmapLoading(false);
+    }
+  }
+
   async function loadDashboard() {
     setLoading(true);
     setAccessChecked(false);
 
-    const user = await getCurrentUser();
-
-    if (!user) {
-      setCurrentUserId(null);
-      setVan(null);
-      setAccessChecked(true);
-      setLoading(false);
-      return;
-    }
-
-    setCurrentUserId(user.id);
-    const myClaims = await getMyVendorClaims(user.id);
-    setClaims(myClaims);
-
     try {
-      const vendor =
-        (await getVendorById(id)) ??
-        (user ? await getVendorByOwnerId(user.id) : null);
+      const user = await getCurrentUser();
+
+      if (!user) {
+        setCurrentUserId(null);
+        setVan(null);
+        setAccessChecked(true);
+        return;
+      }
+
+      setCurrentUserId(user.id);
+
+      const myClaims = await getMyVendorClaims(user.id);
+      setClaims(myClaims);
+
+      const vendor = await getVendorByOwnerId(user.id);
 
       if (!vendor) {
         setVan(null);
         setAccessChecked(true);
-        setLoading(false);
+        return;
+      }
+
+      if (vendor.isSuspended) {
+        setVan(null);
+        setAccessChecked(true);
         return;
       }
 
       if (vendor.owner_id !== user.id) {
         setVan(null);
         setAccessChecked(true);
-        setLoading(false);
         return;
       }
 
       const assetVendor = vendor as AssetAwareVan;
+
       const nextPhotos =
         Array.isArray(assetVendor.photos) && assetVendor.photos.length > 0
           ? assetVendor.photos.filter(Boolean)
@@ -194,17 +540,26 @@ export default function VendorDashboardScreen() {
       setVendorMessage(vendor.vendorMessage ?? "");
       setIsLive(vendor.isLive);
       setFoodCategories(vendor.foodCategories ?? []);
+      setFoodCategorySearch("");
       setPhotos(nextPhotos);
+      setLogoUri(assetVendor.logoUrl ?? null);
+      setLogoPath(assetVendor.logoPath ?? null);
       setMenuPdfName(assetVendor.menuPdfName ?? null);
       setMenuPdfUri(nextMenuPdfUri);
       setMenuPdfStoragePath(assetVendor.menuPdfUrl ?? null);
       setLat(vendor.lat);
       setLng(vendor.lng);
+
+      await Promise.all([
+        loadAdvancedInsights(vendor.id, vendor.subscriptionTier ?? "free"),
+        loadHeatmapPoints(vendor.id, vendor.subscriptionTier ?? "free"),
+      ]);
+
       setAccessChecked(true);
-      setLoading(false);
     } catch {
       setVan(null);
       setAccessChecked(true);
+    } finally {
       setLoading(false);
     }
   }
@@ -248,9 +603,7 @@ export default function VendorDashboardScreen() {
       selectionLimit: 8,
     });
 
-    if (result.canceled) {
-      return;
-    }
+    if (result.canceled) return;
 
     const selectedUris = result.assets.map((asset) => asset.uri).filter(Boolean);
 
@@ -260,10 +613,53 @@ export default function VendorDashboardScreen() {
     });
   }
 
+  async function pickLogo() {
+    if (!van) return;
+
+    if (van.subscriptionTier === "free") {
+      Alert.alert(
+        "Growth plan required",
+        "Upgrade to Growth or above to upload your logo."
+      );
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert(
+        "Permission needed",
+        "Please allow photo library access to upload your logo."
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+      allowsEditing: true,
+      aspect: [1, 1],
+      allowsMultipleSelection: false,
+    });
+
+    if (result.canceled) return;
+
+    const uri = result.assets[0]?.uri;
+    if (!uri) return;
+
+    setLogoUri(uri);
+    setLogoPath(null);
+  }
+
   function removePhoto(indexToRemove: number) {
     setPhotos((current) =>
       current.filter((_, index) => index !== indexToRemove)
     );
+  }
+
+  function removeLogo() {
+    setLogoUri(null);
+    setLogoPath(null);
   }
 
   async function pickMenuPdf() {
@@ -286,9 +682,7 @@ export default function VendorDashboardScreen() {
         multiple: false,
       });
 
-      if (result.canceled) {
-        return;
-      }
+      if (result.canceled) return;
 
       const file = result.assets[0];
 
@@ -304,6 +698,26 @@ export default function VendorDashboardScreen() {
     setMenuPdfName(null);
     setMenuPdfUri(null);
     setMenuPdfStoragePath(null);
+  }
+
+  async function openMenuPdfFromDashboard() {
+    if (!menuPdfStoragePath) {
+      Alert.alert("Menu unavailable", "No menu PDF has been uploaded yet.");
+      return;
+    }
+
+    try {
+      const freshUrl = await getVendorMenuPdfSignedUrl(menuPdfStoragePath);
+
+      if (!freshUrl) {
+        Alert.alert("Open failed", "We could not open the menu PDF.");
+        return;
+      }
+
+      await Linking.openURL(freshUrl);
+    } catch {
+      Alert.alert("Open failed", "We could not open the menu PDF.");
+    }
   }
 
   function jumpToEditSection() {
@@ -342,15 +756,28 @@ export default function VendorDashboardScreen() {
     });
   }
 
+  async function handleLiveToggle(newStatus: boolean) {
+    if (!van) return;
+
+    try {
+      await supabase.from("vendors").update({ is_live: newStatus }).eq("id", van.id);
+
+      setIsLive(newStatus);
+    } catch (error) {
+      Alert.alert(
+        "Error updating live status",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    }
+  }
+
   async function saveChanges() {
     if (!van) {
       Alert.alert("Vendor not found");
       return;
     }
 
-    if (isSaving) {
-      return;
-    }
+    if (isSaving) return;
 
     const features = getSubscriptionFeatures(van.subscriptionTier);
 
@@ -364,8 +791,11 @@ export default function VendorDashboardScreen() {
 
     const user = await getCurrentUser();
 
-    if (!user || user.id !== van.owner_id) {
-      Alert.alert("Access denied", "You can only edit your own listing.");
+    if (!user || user.id !== van.owner_id || van.isSuspended) {
+      Alert.alert(
+        "Access denied",
+        "This listing is unavailable or you do not have permission to edit it."
+      );
       return;
     }
 
@@ -373,6 +803,8 @@ export default function VendorDashboardScreen() {
 
     try {
       let nextPhotos: string[] = [];
+      let nextLogoUri: string | null = logoUri;
+      let nextLogoPath: string | null = logoPath;
       let nextMenuPdfStoragePath: string | null = null;
       let nextMenuPdfName: string | null = null;
       let nextMenuPdfUri: string | null = null;
@@ -381,12 +813,27 @@ export default function VendorDashboardScreen() {
         const existingRemotePhotos = photos.filter((uri) => !isLocalFileUri(uri));
         const localPhotos = photos.filter((uri) => isLocalFileUri(uri));
 
+        const uniqueLocalPhotos = Array.from(new Set(localPhotos));
+
         const uploadedPhotoUrls =
-          localPhotos.length > 0
-            ? await uploadVendorPhotos(user.id, localPhotos)
+          uniqueLocalPhotos.length > 0
+            ? await uploadVendorPhotos(user.id, uniqueLocalPhotos)
             : [];
 
         nextPhotos = [...existingRemotePhotos, ...uploadedPhotoUrls].slice(0, 8);
+
+        if (logoUri) {
+          const isExistingStoredLogo = !!logoPath && !isLocalFileUri(logoUri);
+
+          if (!isExistingStoredLogo) {
+            const uploadedLogo = await uploadVendorLogo(user.id, logoUri);
+            nextLogoUri = uploadedLogo.publicUrl;
+            nextLogoPath = uploadedLogo.storagePath;
+          }
+        } else {
+          nextLogoUri = null;
+          nextLogoPath = null;
+        }
 
         if (menuPdfUri && menuPdfName) {
           const isExistingStoredPdf =
@@ -407,6 +854,10 @@ export default function VendorDashboardScreen() {
             nextMenuPdfName = uploadedPdf.fileName;
             nextMenuPdfUri = uploadedPdf.signedUrl;
           }
+        } else {
+          nextMenuPdfStoragePath = null;
+          nextMenuPdfName = null;
+          nextMenuPdfUri = null;
         }
       }
 
@@ -419,8 +870,12 @@ export default function VendorDashboardScreen() {
           menu: menu.trim() || "Menu coming soon",
           schedule: schedule.trim() || "Schedule coming soon",
           vendor_message: features.reviews ? vendorMessage.trim() : null,
-          photo: features.images ? nextPhotos[0] ?? null : null,
+          photo: features.images
+            ? nextPhotos[0] ?? van.photo ?? null
+            : null,
           photos: features.images ? nextPhotos : [],
+          logo_url: features.images ? nextLogoUri : null,
+          logo_path: features.images ? nextLogoPath : null,
           menu_pdf_url: features.images ? nextMenuPdfStoragePath : null,
           menu_pdf_name: features.images ? nextMenuPdfName : null,
           is_live: features.liveStatus ? isLive : false,
@@ -436,10 +891,13 @@ export default function VendorDashboardScreen() {
       }
 
       setPhotos(nextPhotos);
+      setLogoUri(nextLogoUri);
+      setLogoPath(nextLogoPath);
       setMenuPdfName(nextMenuPdfName);
       setMenuPdfUri(nextMenuPdfUri);
       setMenuPdfStoragePath(nextMenuPdfStoragePath);
-      setVan({
+
+      const updatedVan: AssetAwareVan = {
         ...van,
         name: name.trim(),
         vendorName: vendorName.trim(),
@@ -451,11 +909,26 @@ export default function VendorDashboardScreen() {
         foodCategories,
         photo: features.images ? nextPhotos[0] ?? null : null,
         photos: features.images ? nextPhotos : [],
+        logoUrl: features.images ? nextLogoUri : null,
+        logoPath: features.images ? nextLogoPath : null,
         menuPdfUrl: features.images ? nextMenuPdfStoragePath : null,
         menuPdfName: features.images ? nextMenuPdfName : null,
         lat,
         lng,
-      });
+      };
+
+      setVan(updatedVan);
+
+      await Promise.all([
+        loadAdvancedInsights(
+          updatedVan.id,
+          updatedVan.subscriptionTier ?? "free"
+        ),
+        loadHeatmapPoints(
+          updatedVan.id,
+          updatedVan.subscriptionTier ?? "free"
+        ),
+      ]);
 
       Alert.alert("Saved", "Your dashboard changes were saved.");
     } catch (error) {
@@ -586,7 +1059,8 @@ export default function VendorDashboardScreen() {
       <View style={styles.centered}>
         <Text style={styles.notFoundTitle}>Access denied</Text>
         <Text style={styles.accessText}>
-          You can only manage your own vendor listing.
+          This vendor listing is unavailable, suspended, or not assigned to your
+          account.
         </Text>
 
         <Pressable style={styles.softButtonDark} onPress={() => router.back()}>
@@ -637,11 +1111,29 @@ export default function VendorDashboardScreen() {
 
   const upgradeText =
     van.subscriptionTier === "growth"
-      ? "Unlock featured badge, priority placement, promotions, notifications, and trending boost."
-      : "Unlock photos, live status, analytics, reviews, and a stronger vendor presence.";
+      ? "Unlock advanced analytics, stronger branding, and a more premium presence."
+      : "Unlock increased visibility, logo branding, listing photos, and stronger customer trust.";
 
   const upgradeButtonText =
     van.subscriptionTier === "growth" ? "Upgrade to Pro" : "Upgrade to Growth";
+
+  const filteredFoodCategoryOptions = FOOD_CATEGORY_OPTIONS.filter((category) =>
+    category.toLowerCase().includes(foodCategorySearch.trim().toLowerCase())
+  );
+
+  const conversionRate =
+    (van.views ?? 0) > 0
+      ? (((van.directions ?? 0) / (van.views ?? 0)) * 100).toFixed(1)
+      : "0.0";
+
+  const hasLogo = !!logoUri;
+
+  const proVisualSupport =
+    van.subscriptionTier === "pro"
+      ? "Your Pro plan gives your dashboard a premium look and access to deeper performance insights."
+      : van.subscriptionTier === "growth"
+        ? "Growth helps you look more established with branding and stronger visibility tools."
+        : "Free gets you listed. Growth and Pro are built to help you stand out more.";
 
   return (
     <ScrollView
@@ -655,17 +1147,26 @@ export default function VendorDashboardScreen() {
           <View style={styles.headerTextWrap}>
             <Text style={styles.headerTitle}>Vendor Dashboard</Text>
             <Text style={styles.headerSubtitle}>
-              Manage your listing, track your readiness, and keep your presence
-              sharp for customers.
+              Manage your listing, track performance, and sharpen your customer
+              presence.
             </Text>
           </View>
 
-          <Pressable
-            style={styles.accountIconButton}
-            onPress={() => router.replace("/(tabs)/account")}
-          >
-            <Text style={styles.accountIconText}>⚙️</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              style={styles.accountIconButton}
+              onPress={() => router.replace("/(tabs)")}
+            >
+              <Text style={styles.accountIconText}>🏠</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.accountIconButton}
+              onPress={() => router.replace("/(tabs)/account")}
+            >
+              <Text style={styles.accountIconText}>⚙️</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -701,7 +1202,12 @@ export default function VendorDashboardScreen() {
         </>
       )}
 
-      <View style={styles.summaryCard}>
+      <View
+        style={[
+          styles.summaryCard,
+          van.subscriptionTier === "pro" && styles.proSummaryCard,
+        ]}
+      >
         <View style={styles.summaryTopRow}>
           <View style={styles.summaryTextBlock}>
             <Text style={styles.summaryTitle}>{van.name}</Text>
@@ -721,7 +1227,11 @@ export default function VendorDashboardScreen() {
                 ]}
               >
                 <Text style={styles.statusBadgeText}>
-                  {features.liveStatus ? (isLive ? "LIVE" : "OFFLINE") : "LISTED"}
+                  {features.liveStatus
+                    ? isLive
+                      ? "LIVE"
+                      : "OFFLINE"
+                    : "LISTED"}
                 </Text>
               </View>
 
@@ -741,9 +1251,13 @@ export default function VendorDashboardScreen() {
                 ? "Your listing is looking strong and ready for customers."
                 : "Complete your menu and schedule to strengthen your listing."}
             </Text>
+
+            <Text style={styles.proVisualSupport}>{proVisualSupport}</Text>
           </View>
 
-          {features.images && photos[0] ? (
+          {hasLogo ? (
+            <Image source={{ uri: logoUri! }} style={styles.logoImage} />
+          ) : features.images && photos[0] ? (
             <Image source={{ uri: photos[0] }} style={styles.summaryImage} />
           ) : null}
         </View>
@@ -760,15 +1274,319 @@ export default function VendorDashboardScreen() {
           </View>
 
           <View style={styles.summaryStatPill}>
-            <Text style={styles.summaryStatLabel}>Photos</Text>
-            <Text style={styles.summaryStatValue}>{photos.length}</Text>
+            <Text style={styles.summaryStatLabel}>Directions</Text>
+            <Text style={styles.summaryStatValue}>{van.directions ?? 0}</Text>
           </View>
 
           <View style={styles.summaryStatPill}>
-            <Text style={styles.summaryStatLabel}>Status</Text>
-            <Text style={styles.summaryStatValue}>{statusLabel}</Text>
+            <Text style={styles.summaryStatLabel}>Conversion</Text>
+            <Text style={styles.summaryStatValue}>{conversionRate}%</Text>
           </View>
         </View>
+      </View>
+
+      {van.subscriptionTier !== "pro" && (
+        <View style={styles.pressureCard}>
+          <Text style={styles.pressureText}>
+            You’re getting views — upgrade to reach more customers and increase
+            conversions.
+          </Text>
+        </View>
+      )}
+
+      {van.subscriptionTier === "pro" ? (
+        <>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Performance Insights</Text>
+            <Text style={styles.sectionSubtitle}>
+              Understand how customers interact with your listing.
+            </Text>
+          </View>
+
+          {insightsLoading ? (
+            <View style={styles.cardBox}>
+              <Text style={styles.loadingInlineText}>Loading insights...</Text>
+            </View>
+          ) : (
+            <>
+              <TrendsMiniChart
+                title="Trends Over Time"
+                subtitle="Daily views over the last 30 days"
+                points={insights?.daily_views ?? []}
+              />
+
+              <PeakHoursChart
+                title="Peak Hours"
+                subtitle="When customers engage most"
+                points={insights?.peak_hours ?? []}
+              />
+
+              <View style={styles.insightCard}>
+                <Text style={styles.insightCardTitle}>Heat Map</Text>
+                <Text style={styles.insightCardSubtitle}>
+                  Where your recent customer activity is coming from.
+                </Text>
+
+                {heatmapLoading ? (
+                  <View style={styles.emptyInlineCard}>
+                    <Text style={styles.emptyInlineTitle}>Loading heat map...</Text>
+                    <Text style={styles.emptyInlineText}>
+                      Pulling recent location activity for your listing.
+                    </Text>
+                  </View>
+                ) : heatmapPoints.length === 0 ? (
+                  <View style={styles.emptyInlineCard}>
+                    <Text style={styles.emptyInlineTitle}>No heat map data yet</Text>
+                    <Text style={styles.emptyInlineText}>
+                      Heat map points will appear once customer interactions are recorded with location data.
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <MapView
+                      style={styles.heatmapMap}
+                      pointerEvents="none"
+                      initialRegion={{
+                        latitude: lat || van.lat,
+                        longitude: lng || van.lng,
+                        latitudeDelta: 0.12,
+                        longitudeDelta: 0.12,
+                      }}
+                      scrollEnabled={false}
+                      zoomEnabled={false}
+                      rotateEnabled={false}
+                      pitchEnabled={false}
+                      toolbarEnabled={false}
+                    >
+                      <Marker
+                        coordinate={{
+                          latitude: lat || van.lat,
+                          longitude: lng || van.lng,
+                        }}
+                        title={van.name}
+                        pinColor="#0B2A5B"
+                      />
+
+                      {heatmapPoints.map((point, index) => (
+                        <Marker
+                          key={`${point.lat}-${point.lng}-${index}`}
+                          coordinate={{
+                            latitude: point.lat,
+                            longitude: point.lng,
+                          }}
+                          anchor={{ x: 0.5, y: 0.5 }}
+                        >
+                          <View
+                            style={[
+                              styles.heatmapVisualDot,
+                              point.weight >= 8
+                                ? styles.heatmapVisualDotHot
+                                : point.weight >= 4
+                                  ? styles.heatmapVisualDotWarm
+                                  : styles.heatmapVisualDotCool,
+                            ]}
+                          >
+                            <Text style={styles.heatmapVisualDotText}>
+                              {point.weight}
+                            </Text>
+                          </View>
+                        </Marker>
+                      ))}
+                    </MapView>
+
+                    <View style={styles.heatmapLegend}>
+                      <View style={styles.heatmapLegendItem}>
+                        <View style={[styles.heatmapLegendDot, styles.heatmapDotCool]} />
+                        <Text style={styles.heatmapLegendText}>Low activity</Text>
+                      </View>
+
+                      <View style={styles.heatmapLegendItem}>
+                        <View style={[styles.heatmapLegendDot, styles.heatmapDotWarm]} />
+                        <Text style={styles.heatmapLegendText}>Medium activity</Text>
+                      </View>
+
+                      <View style={styles.heatmapLegendItem}>
+                        <View style={[styles.heatmapLegendDot, styles.heatmapDotHot]} />
+                        <Text style={styles.heatmapLegendText}>High activity</Text>
+                      </View>
+                    </View>
+                  </>
+                )}
+              </View>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Performance Insights</Text>
+            <Text style={styles.sectionSubtitle}>
+              Pro unlocks deeper vendor intelligence.
+            </Text>
+          </View>
+
+          <View style={styles.inlineLockedCard}>
+            <Text style={styles.inlineLockedTitle}>Pro feature</Text>
+            <Text style={styles.inlineLockedText}>
+              Unlock advanced analytics, peak hours, and customer trends.
+            </Text>
+          </View>
+        </>
+      )}
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Branding</Text>
+        <Text style={styles.sectionSubtitle}>
+          Build a stronger identity for your business.
+        </Text>
+      </View>
+
+      <View style={styles.cardBox}>
+        {van.subscriptionTier === "free" ? (
+          <View style={styles.inlineLockedCard}>
+            <Text style={styles.inlineLockedTitle}>Growth required</Text>
+            <Text style={styles.inlineLockedText}>
+              Add your logo to build trust and stand out.
+            </Text>
+          </View>
+        ) : (
+          <>
+            <Pressable style={styles.softButton} onPress={pickLogo}>
+              <Text style={styles.softButtonText}>
+                {logoUri ? "Replace Logo" : "Upload Logo"}
+              </Text>
+            </Pressable>
+
+            {logoUri ? (
+              <View style={styles.logoPreview}>
+                <Image source={{ uri: logoUri }} style={styles.logoLarge} />
+
+                <Pressable
+                  style={styles.galleryDeleteButton}
+                  onPress={removeLogo}
+                >
+                  <Text style={styles.galleryDeleteButtonText}>Remove</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.emptyAssetBox}>
+                <Text style={styles.emptyAssetTitle}>No logo uploaded yet</Text>
+                <Text style={styles.emptyAssetText}>
+                  Add a square logo to strengthen your brand identity.
+                </Text>
+              </View>
+            )}
+          </>
+        )}
+      </View>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Tier Growth</Text>
+        <Text style={styles.sectionSubtitle}>
+          See what your next plan unlocks for your business.
+        </Text>
+      </View>
+
+      {van.subscriptionTier !== "pro" ? (
+        <View style={styles.cardBox}>
+          <View style={styles.upgradeBadge}>
+            <Text style={styles.upgradeBadgeText}>{currentPlanLabel}</Text>
+          </View>
+
+          <Text style={styles.upgradeTitle}>{upgradeTitle}</Text>
+          <Text style={styles.upgradeText}>{upgradeText}</Text>
+
+          <View style={styles.upgradeFeatureList}>
+            {van.subscriptionTier === "free" ? (
+              <>
+                <Text style={styles.upgradeFeature}>• Add listing photos</Text>
+                <Text style={styles.upgradeFeature}>• Upload your logo</Text>
+                <Text style={styles.upgradeFeature}>• Use live status</Text>
+                <Text style={styles.upgradeFeature}>
+                  • Build stronger customer trust
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.upgradeFeature}>
+                  • Unlock advanced analytics
+                </Text>
+                <Text style={styles.upgradeFeature}>
+                  • See trends over time
+                </Text>
+                <Text style={styles.upgradeFeature}>
+                  • Discover your peak hours
+                </Text>
+                <Text style={styles.upgradeFeature}>
+                  • Access premium performance tools
+                </Text>
+              </>
+            )}
+          </View>
+
+          <Pressable
+            style={styles.upgradeButton}
+            onPress={() => router.push("/vendor/upgrade")}
+          >
+            <Text style={styles.upgradeButtonText}>{upgradeButtonText}</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.cardBox}>
+          <Text style={styles.proNoteTitle}>Pro Active</Text>
+          <Text style={styles.proNoteText}>
+            You have access to premium analytics, stronger branding, and the
+            most advanced vendor tools currently available.
+          </Text>
+        </View>
+      )}
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Plan Guide</Text>
+        <Text style={styles.sectionSubtitle}>
+          Understand what each subscription tier unlocks.
+        </Text>
+      </View>
+
+      <View style={styles.cardBox}>
+        <TierExplanationCard
+          title="Free — Get listed"
+          subtitle="Basic presence"
+          accent="free"
+          isExpanded={expandedTier === "free"}
+          onToggle={() => setExpandedTier("free")}
+        >
+          <Text style={styles.tierItem}>• Listing visibility</Text>
+          <Text style={styles.tierItem}>• Basic views and directions</Text>
+          <Text style={styles.tierItem}>• Standard map presence</Text>
+        </TierExplanationCard>
+
+        <TierExplanationCard
+          title="Growth — Get found"
+          subtitle="Improve visibility"
+          accent="growth"
+          isExpanded={expandedTier === "growth"}
+          onToggle={() => setExpandedTier("growth")}
+        >
+          <Text style={styles.tierItem}>• Photo gallery</Text>
+          <Text style={styles.tierItem}>• Logo branding</Text>
+          <Text style={styles.tierItem}>• Live status</Text>
+          <Text style={styles.tierItem}>• Stronger customer trust</Text>
+        </TierExplanationCard>
+
+        <TierExplanationCard
+          title="Pro — Stand out"
+          subtitle="Premium performance tools"
+          accent="pro"
+          isExpanded={expandedTier === "pro"}
+          onToggle={() => setExpandedTier("pro")}
+        >
+          <Text style={styles.tierItem}>• Advanced analytics</Text>
+          <Text style={styles.tierItem}>• Conversion tracking</Text>
+          <Text style={styles.tierItem}>• Trends over time</Text>
+          <Text style={styles.tierItem}>• Peak hours insights</Text>
+          <Text style={styles.tierItem}>• Heat map insights</Text>
+        </TierExplanationCard>
       </View>
 
       <View style={styles.sectionHeader}>
@@ -783,7 +1601,7 @@ export default function VendorDashboardScreen() {
           {features.liveStatus ? (
             <Pressable
               style={[styles.actionButton, styles.actionButtonPrimary]}
-              onPress={() => setIsLive((current) => !current)}
+              onPress={() => handleLiveToggle(!isLive)}
             >
               <Text style={styles.actionButtonPrimaryText}>
                 {isLive ? "Go Offline" : "Go Live"}
@@ -852,76 +1670,6 @@ export default function VendorDashboardScreen() {
         </View>
       </View>
 
-      {van.subscriptionTier !== "pro" ? (
-        <>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Tier Growth</Text>
-            <Text style={styles.sectionSubtitle}>
-              See what your next plan unlocks for your business.
-            </Text>
-          </View>
-
-          <View style={styles.cardBox}>
-            <View style={styles.upgradeBadge}>
-              <Text style={styles.upgradeBadgeText}>{currentPlanLabel}</Text>
-            </View>
-
-            <Text style={styles.upgradeTitle}>{upgradeTitle}</Text>
-            <Text style={styles.upgradeText}>{upgradeText}</Text>
-
-            <View style={styles.upgradeFeatureList}>
-              {van.subscriptionTier === "free" ? (
-                <>
-                  <Text style={styles.upgradeFeature}>• Add listing photos</Text>
-                  <Text style={styles.upgradeFeature}>• Use live status</Text>
-                  <Text style={styles.upgradeFeature}>• Unlock analytics</Text>
-                  <Text style={styles.upgradeFeature}>• Share status updates</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.upgradeFeature}>
-                    • Unlock featured badge
-                  </Text>
-                  <Text style={styles.upgradeFeature}>
-                    • Get priority placement
-                  </Text>
-                  <Text style={styles.upgradeFeature}>
-                    • Use promotions and notifications
-                  </Text>
-                  <Text style={styles.upgradeFeature}>
-                    • Access trending boost
-                  </Text>
-                </>
-              )}
-            </View>
-
-            <Pressable
-              style={styles.upgradeButton}
-              onPress={() => router.push("/vendor/upgrade")}
-            >
-              <Text style={styles.upgradeButtonText}>{upgradeButtonText}</Text>
-            </Pressable>
-          </View>
-        </>
-      ) : (
-        <>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Tier Growth</Text>
-            <Text style={styles.sectionSubtitle}>
-              You are already on the highest BiteBeacon plan.
-            </Text>
-          </View>
-
-          <View style={styles.cardBox}>
-            <Text style={styles.proNoteTitle}>Pro Active</Text>
-            <Text style={styles.proNoteText}>
-              You have access to premium visibility tools including featured
-              status, promotions, notifications, and trending boost.
-            </Text>
-          </View>
-        </>
-      )}
-
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Listing Health</Text>
         <Text style={styles.sectionSubtitle}>
@@ -952,7 +1700,9 @@ export default function VendorDashboardScreen() {
 
         <View style={styles.healthRow}>
           <Text style={styles.healthLabel}>Menu</Text>
-          <Text style={styles.healthValue}>{menu.trim() ? "Added" : "Missing"}</Text>
+          <Text style={styles.healthValue}>
+            {menu.trim() ? "Added" : "Missing"}
+          </Text>
         </View>
 
         <View style={styles.healthRow}>
@@ -966,6 +1716,17 @@ export default function VendorDashboardScreen() {
           <Text style={styles.healthLabel}>Menu PDF</Text>
           <Text style={styles.healthValue}>
             {menuPdfName ? "Added" : "Optional"}
+          </Text>
+        </View>
+
+        <View style={styles.healthRow}>
+          <Text style={styles.healthLabel}>Logo</Text>
+          <Text style={styles.healthValue}>
+            {van.subscriptionTier === "free"
+              ? "Growth required"
+              : hasLogo
+                ? "Added"
+                : "Missing"}
           </Text>
         </View>
 
@@ -1051,11 +1812,7 @@ export default function VendorDashboardScreen() {
                 <View style={styles.pdfActionsRow}>
                   <Pressable
                     style={styles.pdfActionButton}
-                    onPress={() => {
-                      if (menuPdfUri) {
-                        Linking.openURL(menuPdfUri);
-                      }
-                    }}
+                    onPress={openMenuPdfFromDashboard}
                   >
                     <Text style={styles.pdfActionButtonText}>View</Text>
                   </Pressable>
@@ -1091,7 +1848,7 @@ export default function VendorDashboardScreen() {
 
       <View
         style={styles.sectionHeader}
-        onLayout={(event) => setEditSectionY(event.nativeEvent.layout.y)}
+
       >
         <Text style={styles.sectionTitle}>Edit Listing</Text>
         <Text style={styles.sectionSubtitle}>
@@ -1099,7 +1856,10 @@ export default function VendorDashboardScreen() {
         </Text>
       </View>
 
-      <View style={styles.cardBox}>
+      <View
+        style={styles.cardBox}
+        onLayout={(event) => setEditSectionY(event.nativeEvent.layout.y)}
+      >
         <Text style={styles.label}>Van name</Text>
         <TextInput
           style={styles.input}
@@ -1148,8 +1908,16 @@ export default function VendorDashboardScreen() {
         />
 
         <Text style={styles.label}>Food categories</Text>
+        <TextInput
+          style={styles.input}
+          value={foodCategorySearch}
+          onChangeText={setFoodCategorySearch}
+          placeholder="Search food categories"
+          placeholderTextColor="#7A7A7A"
+        />
+
         <View style={styles.checkboxGroup}>
-          {FOOD_CATEGORY_OPTIONS.map((category) => {
+          {filteredFoodCategoryOptions.map((category) => {
             const isSelected = foodCategories.includes(category);
 
             return (
@@ -1174,6 +1942,12 @@ export default function VendorDashboardScreen() {
             );
           })}
         </View>
+
+        {filteredFoodCategoryOptions.length === 0 ? (
+          <Text style={styles.categorySearchEmptyText}>
+            No matching categories found.
+          </Text>
+        ) : null}
 
         {features.reviews ? (
           <>
@@ -1200,7 +1974,10 @@ export default function VendorDashboardScreen() {
         {features.liveStatus ? (
           <View style={styles.liveRow}>
             <Text style={styles.liveLabel}>Live now</Text>
-            <Switch value={isLive} onValueChange={setIsLive} />
+            <Switch
+              value={isLive}
+              onValueChange={(value) => handleLiveToggle(value)}
+            />
           </View>
         ) : (
           <View style={styles.liveRow}>
@@ -1211,9 +1988,12 @@ export default function VendorDashboardScreen() {
 
         <Pressable
           style={[styles.primaryButton, isSaving && { opacity: 0.7 }]}
-          onPress={saveChanges}
+          onPress={() => {
+            if (!isSaving) saveChanges();
+          }}
           disabled={isSaving}
         >
+
           <Text style={styles.primaryButtonText}>
             {isSaving ? "Saving Changes..." : "Save Changes"}
           </Text>
@@ -1288,6 +2068,12 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
 
+  loadingInlineText: {
+    fontSize: 14,
+    color: "#5F6368",
+    fontWeight: "700",
+  },
+
   notFoundTitle: {
     fontSize: 26,
     fontWeight: "800",
@@ -1316,6 +2102,11 @@ const styles = StyleSheet.create({
 
   headerTextWrap: {
     flex: 1,
+  },
+
+  headerActions: {
+    flexDirection: "row",
+    gap: 10,
   },
 
   accountIconButton: {
@@ -1350,7 +2141,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
     padding: 20,
-    marginBottom: 24,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: thinOrange,
     shadowColor: "#000",
@@ -1358,6 +2149,13 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
     elevation: 4,
+  },
+
+  proSummaryCard: {
+    borderColor: "#FFB357",
+    shadowColor: "#FF7A00",
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
   },
 
   cardBox: {
@@ -1372,6 +2170,22 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
+  },
+
+  pressureCard: {
+    backgroundColor: "#FFF4E8",
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 22,
+    borderWidth: 1,
+    borderColor: "#FFD1A6",
+  },
+
+  pressureText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#8A4B00",
+    lineHeight: 20,
   },
 
   summaryTopRow: {
@@ -1412,6 +2226,27 @@ const styles = StyleSheet.create({
     width: 82,
     height: 82,
     borderRadius: 18,
+  },
+
+  logoImage: {
+    width: 82,
+    height: 82,
+    borderRadius: 18,
+    backgroundColor: "#F5F7FA",
+  },
+
+  logoLarge: {
+    width: 120,
+    height: 120,
+    borderRadius: 24,
+    alignSelf: "center",
+    marginTop: 12,
+    backgroundColor: "#F5F7FA",
+  },
+
+  logoPreview: {
+    alignItems: "center",
+    marginTop: 10,
   },
 
   statusBadge: {
@@ -1484,6 +2319,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#5F6368",
     lineHeight: 21,
+    marginBottom: 8,
+  },
+
+  proVisualSupport: {
+    fontSize: 13,
+    color: "#8A4B00",
+    lineHeight: 19,
+    fontWeight: "700",
   },
 
   summaryStatsRow: {
@@ -1532,6 +2375,249 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     fontSize: 14,
     color: "rgba(255,255,255,0.72)",
+    lineHeight: 20,
+  },
+
+  insightCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 22,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: thinOrange,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+
+  insightCardTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0B2A5B",
+    marginBottom: 4,
+  },
+
+  insightCardSubtitle: {
+    fontSize: 13,
+    color: "#5F6368",
+    lineHeight: 19,
+    marginBottom: 14,
+  },
+
+  trendChart: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 4,
+    height: 128,
+    marginTop: 4,
+  },
+
+  trendBarWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+
+  trendBarTrack: {
+    width: "100%",
+    height: 120,
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+
+  trendBarFill: {
+    width: "100%",
+    borderRadius: 999,
+    backgroundColor: "#FF7A00",
+    minHeight: 4,
+  },
+
+  trendAxisRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 12,
+  },
+
+  trendAxisLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#5F6368",
+  },
+
+  hourChart: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 4,
+    height: 146,
+    marginTop: 4,
+  },
+
+  hourBarWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+
+  hourBarTrack: {
+    width: "100%",
+    height: 120,
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+
+  hourBarFill: {
+    width: "100%",
+    borderRadius: 999,
+    backgroundColor: "#FF7A00",
+    minHeight: 4,
+  },
+
+  hourAxisLabel: {
+    marginTop: 8,
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#5F6368",
+    textAlign: "center",
+  },
+
+  hourAxisSpacer: {
+    marginTop: 8,
+    height: 12,
+  },
+
+  heatmapList: {
+    gap: 10,
+  },
+
+  heatmapRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 6,
+  },
+
+  heatmapDotWrap: {
+    width: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  heatmapDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 999,
+  },
+
+  heatmapDotCool: {
+    backgroundColor: "#8FB3E8",
+  },
+
+  heatmapDotWarm: {
+    backgroundColor: "#FFB067",
+  },
+
+  heatmapDotHot: {
+    backgroundColor: "#FF7A00",
+  },
+
+  heatmapTextWrap: {
+    flex: 1,
+  },
+
+  heatmapCoords: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0B2A5B",
+    marginBottom: 2,
+  },
+
+  heatmapMeta: {
+    fontSize: 13,
+    color: "#5F6368",
+    lineHeight: 18,
+  },
+
+  heatmapMap: {
+    width: "100%",
+    height: 220,
+    borderRadius: 18,
+    overflow: "hidden",
+    marginBottom: 14,
+  },
+
+  heatmapVisualDot: {
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+
+  heatmapVisualDotCool: {
+    backgroundColor: "#8FB3E8",
+  },
+
+  heatmapVisualDotWarm: {
+    backgroundColor: "#FFB067",
+  },
+
+  heatmapVisualDotHot: {
+    backgroundColor: "#FF7A00",
+  },
+
+  heatmapVisualDotText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+
+  heatmapLegend: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+
+  heatmapLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  heatmapLegendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+  },
+
+  heatmapLegendText: {
+    fontSize: 12,
+    color: "#5F6368",
+    fontWeight: "700",
+  },
+
+  emptyInlineCard: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+
+  emptyInlineTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0B2A5B",
+    marginBottom: 4,
+  },
+
+  emptyInlineText: {
+    fontSize: 14,
+    color: "#5F6368",
     lineHeight: 20,
   },
 
@@ -1648,6 +2734,62 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#5F6368",
     lineHeight: 22,
+  },
+
+  tierExplainCard: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+
+  tierExplainCardGrowth: {
+    borderColor: "#C9D9F6",
+    backgroundColor: "#F4F8FF",
+  },
+
+  tierExplainCardPro: {
+    borderColor: "#FFD3AD",
+    backgroundColor: "#FFF8F1",
+  },
+
+  tierExplainHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  tierExplainTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0B2A5B",
+    marginBottom: 2,
+  },
+
+  tierExplainSubtitle: {
+    fontSize: 13,
+    color: "#5F6368",
+    lineHeight: 18,
+  },
+
+  tierExplainToggle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#0B2A5B",
+    marginLeft: 10,
+  },
+
+  tierExplainBody: {
+    marginTop: 12,
+    gap: 6,
+  },
+
+  tierItem: {
+    fontSize: 14,
+    color: "#1F2937",
+    lineHeight: 20,
   },
 
   healthHeader: {
@@ -1877,6 +3019,13 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
 
+  categorySearchEmptyText: {
+    fontSize: 14,
+    color: "#5F6368",
+    marginBottom: 16,
+    fontWeight: "600",
+  },
+
   inlineLockedCard: {
     backgroundColor: "#FFF3E0",
     borderRadius: 16,
@@ -1986,6 +3135,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
     backgroundColor: "#0B2A5B",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
   },
 
   manageButtonText: {

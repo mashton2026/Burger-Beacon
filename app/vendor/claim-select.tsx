@@ -81,7 +81,10 @@ export default function ClaimSelectScreen() {
     try {
       const allVendors = await getAllVendors();
       const temporaryVans = allVendors.filter(
-        (vendor) => vendor.temporary === true && !vendor.owner_id
+        (vendor) =>
+          vendor.temporary === true &&
+          !vendor.owner_id &&
+          !vendor.isSuspended
       );
       setSpottedVans(temporaryVans);
     } catch {

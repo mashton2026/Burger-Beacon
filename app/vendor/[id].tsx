@@ -23,9 +23,16 @@ import {
 } from "../../services/favouritesService";
 import { getVendorMenuPdfSignedUrl } from "../../services/storageService";
 import {
+  canCountVendorInteraction,
+  getUserVendorRating,
   getVendorById,
+  getVendorRatingCount,
   incrementVendorDirections,
+  incrementVendorViews,
+  recordVendorInteraction,
+  refreshVendorRating,
   setVendorLiveStatus,
+  upsertVendorRating,
 } from "../../services/vendorService";
 import { type Van } from "../../types/van";
 
@@ -33,7 +40,35 @@ type AssetAwareVan = Van & {
   photos?: string[];
   menuPdfUrl?: string | null;
   menuPdfName?: string | null;
+  logoUrl?: string | null;
+  logoPath?: string | null;
 };
+
+const NAVY = "#061A38";
+const NAVY_DARK = "#0A2347";
+const PANEL = "#14386E";
+const PANEL_DEEP = "#1A3F77";
+const PANEL_ALT = "#1A315C";
+const ORANGE = "#FF7A00";
+const ORANGE_SOFT = "#FFB067";
+const WHITE = "#FFFFFF";
+const TEXT_MUTED = "rgba(255,255,255,0.72)";
+const GREEN = "#1DB954";
+const OFFLINE = "#6F84AA";
+
+function getExpiryText(expiresAt?: string | null) {
+  if (!expiresAt) return null;
+
+  const now = new Date();
+  const expiry = new Date(expiresAt);
+  const diffMs = expiry.getTime() - now.getTime();
+
+  if (diffMs <= 0) return "Expired";
+
+  const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  if (days === 1) return "Expires in 1 day";
+  return `Expires in ${days} days`;
+}
 
 export default function VendorScreen() {
   const params = useLocalSearchParams();
@@ -44,19 +79,29 @@ export default function VendorScreen() {
   const [isSavingFavourite, setIsSavingFavourite] = useState(false);
   const [isFavourite, setIsFavourite] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [menuPdfSignedUrl, setMenuPdfSignedUrl] = useState<string | null>(null);
   const [isCurrentUserVendorAccount, setIsCurrentUserVendorAccount] =
     useState(false);
+  const [userRating, setUserRating] = useState<number | null>(null);
+  const [ratingCount, setRatingCount] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
       async function loadScreen() {
         setLoading(true);
-        await loadCurrentUser();
-        await loadVan();
-        await checkIfFavourite();
-        await loadCurrentUserVendorState();
-        setLoading(false);
+
+        try {
+          await loadVan();
+
+          await Promise.all([
+            loadCurrentUser(),
+            loadUserRating(),
+            loadRatingCount(),
+            checkIfFavourite(),
+            loadCurrentUserVendorState(),
+          ]);
+        } finally {
+          setLoading(false);
+        }
       }
 
       loadScreen();
@@ -89,25 +134,68 @@ export default function VendorScreen() {
 
       if (!vendor) {
         setVan(null);
-        setMenuPdfSignedUrl(null);
         return;
       }
 
       setVan(vendor);
 
-      if (vendor.menuPdfUrl) {
-        const signedUrl = await getVendorMenuPdfSignedUrl(vendor.menuPdfUrl);
-        setMenuPdfSignedUrl(signedUrl);
-      } else {
-        setMenuPdfSignedUrl(null);
-      }
+      void (async () => {
+        try {
+          const userId = await getCurrentUserId();
+
+          if (userId) {
+            const canCount = await canCountVendorInteraction(
+              vendor.id,
+              userId,
+              "view",
+              1440
+            );
+
+            if (canCount) {
+              const nextViews = await incrementVendorViews(vendor.id);
+              await recordVendorInteraction(vendor.id, userId, "view");
+              setVan((prev) => (prev ? { ...prev, views: nextViews } : prev));
+            }
+          }
+        } catch (error) {
+          console.log(
+            "Error updating views:",
+            error instanceof Error ? error.message : "Unknown error"
+          );
+        }
+      })();
+
     } catch (error) {
       console.log(
         "Error loading vendor:",
         error instanceof Error ? error.message : "Unknown error"
       );
       setVan(null);
-      setMenuPdfSignedUrl(null);
+    }
+  }
+
+  async function loadUserRating() {
+    try {
+      const userId = await getCurrentUserId();
+
+      if (!userId) {
+        setUserRating(null);
+        return;
+      }
+
+      const rating = await getUserVendorRating(id, userId);
+      setUserRating(rating);
+    } catch {
+      setUserRating(null);
+    }
+  }
+
+  async function loadRatingCount() {
+    try {
+      const count = await getVendorRatingCount(id);
+      setRatingCount(count);
+    } catch {
+      setRatingCount(0);
     }
   }
 
@@ -138,7 +226,13 @@ export default function VendorScreen() {
 
     try {
       await setVendorLiveStatus(van.id, newStatus);
-      setVan({ ...van, isLive: newStatus });
+
+      const updatedVan = (await getVendorById(van.id)) as AssetAwareVan | null;
+
+      if (updatedVan) {
+        setVan(updatedVan);
+      }
+
       Alert.alert(newStatus ? "Vendor is now LIVE" : "Vendor is now OFFLINE");
     } catch (error) {
       Alert.alert(
@@ -152,12 +246,31 @@ export default function VendorScreen() {
     if (!van) return;
 
     try {
-      const nextDirections = await incrementVendorDirections(
-        van.id,
-        van.directions ?? 0
-      );
+      const userId = await getCurrentUserId();
 
-      setVan({ ...van, directions: nextDirections });
+      let nextDirections: number | null = null;
+
+      if (userId) {
+        const canCount = await canCountVendorInteraction(
+          van.id,
+          userId,
+          "direction",
+          1440
+        );
+
+        if (canCount) {
+          nextDirections = await incrementVendorDirections(van.id);
+          await recordVendorInteraction(van.id, userId, "direction");
+        }
+      } else {
+        nextDirections = await incrementVendorDirections(van.id);
+      }
+
+      if (nextDirections !== null) {
+        setVan((prev) =>
+          prev ? { ...prev, directions: nextDirections } : prev
+        );
+      }
 
       const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${van.lat},${van.lng}`;
       await Linking.openURL(mapsUrl);
@@ -170,13 +283,20 @@ export default function VendorScreen() {
   }
 
   async function openMenuPdf() {
-    if (!menuPdfSignedUrl) {
+    if (!van?.menuPdfUrl) {
       Alert.alert("Menu unavailable", "This vendor has not uploaded a menu PDF.");
       return;
     }
 
     try {
-      await Linking.openURL(menuPdfSignedUrl);
+      const freshUrl = await getVendorMenuPdfSignedUrl(van.menuPdfUrl);
+
+      if (!freshUrl) {
+        Alert.alert("Open failed", "We could not open the menu PDF.");
+        return;
+      }
+
+      await Linking.openURL(freshUrl);
     } catch {
       Alert.alert("Open failed", "We could not open the menu PDF.");
     }
@@ -229,6 +349,18 @@ export default function VendorScreen() {
   function openClaimScreen() {
     if (!van) return;
 
+    if (
+      van.listingSource === "user_spotted" &&
+      van.expiresAt &&
+      new Date(van.expiresAt) < new Date()
+    ) {
+      Alert.alert(
+        "Listing expired",
+        "This spotted listing has expired and can no longer be claimed."
+      );
+      return;
+    }
+
     if (!isCurrentUserVendorAccount) {
       Alert.alert(
         "Vendor login required",
@@ -245,24 +377,20 @@ export default function VendorScreen() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.content}>
-          <Text style={styles.notFound}>Loading listing...</Text>
-        </View>
+      <View style={styles.centeredScreen}>
+        <Text style={styles.loadingText}>Loading listing...</Text>
       </View>
     );
   }
 
   if (!van) {
     return (
-      <View style={styles.container}>
-        <View style={styles.content}>
-          <Text style={styles.notFound}>Listing not found</Text>
+      <View style={styles.centeredScreen}>
+        <Text style={styles.notFoundTitle}>Listing not found</Text>
 
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backText}>Go Back</Text>
-          </Pressable>
-        </View>
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </Pressable>
       </View>
     );
   }
@@ -277,47 +405,331 @@ export default function VendorScreen() {
         ? [van.photo]
         : [];
 
+  const statusText =
+    van.listingSource === "user_spotted"
+      ? "SPOTTED"
+      : features.liveStatus
+        ? van.isLive
+          ? "LIVE"
+          : "LISTED"
+        : "LISTED";
+
+  const primaryVisual =
+    van.logoUrl ?? galleryPhotos[0] ?? null;
+
+  const showLogoSection = !!van.logoUrl;
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>{van.name}</Text>
+      <View style={styles.topAccent} />
 
-        {van.subscriptionTier === "pro" ? (
-          <View style={styles.featuredBadge}>
-            <Text style={styles.featuredBadgeText}>FEATURED</Text>
+      <View style={styles.heroShell}>
+        <View style={styles.heroGlow} />
+
+        <View style={styles.heroCard}>
+          <View style={styles.heroTopRow}>
+            <View style={styles.heroTitleBlock}>
+              <Text style={styles.heroEyebrow}>BiteBeacon Listing</Text>
+              <Text style={styles.title}>{van.name}</Text>
+              <Text style={styles.meta}>{van.cuisine}</Text>
+            </View>
+
+            {primaryVisual ? (
+              <Image source={{ uri: primaryVisual }} style={styles.heroVisual} />
+            ) : null}
           </View>
+
+          <View style={styles.heroBadgeRow}>
+            <View
+              style={[
+                styles.statusBadge,
+                van.listingSource === "user_spotted"
+                  ? styles.statusTemporary
+                  : features.liveStatus
+                    ? van.isLive
+                      ? styles.statusLive
+                      : styles.statusOffline
+                    : styles.statusOffline,
+              ]}
+            >
+              <Text style={styles.statusBadgeText}>{statusText}</Text>
+            </View>
+
+            {van.subscriptionTier === "pro" && (
+              <View style={styles.planBadge}>
+                <Text style={styles.planBadgeText}>PRO</Text>
+              </View>
+            )}
+
+            {van.owner_id && van.listingSource !== "user_spotted" ? (
+              <View style={styles.verifiedBadge}>
+                <Text style={styles.verifiedBadgeText}>VENDOR MANAGED</Text>
+              </View>
+            ) : null}
+
+            {van.subscriptionTier === "pro" ? (
+              <View style={styles.featuredBadge}>
+                <Text style={styles.featuredBadgeText}>PRO</Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.heroStatsRow}>
+            <View style={styles.heroStatBox}>
+              <Text style={styles.heroStatLabel}>Rating</Text>
+              <Text style={styles.heroStatValue}>
+                {ratingCount >= 3 ? van.rating.toFixed(1) : "N/A"}
+              </Text>
+            </View>
+
+            <View style={styles.heroStatBox}>
+              <Text style={styles.heroStatLabel}>Views</Text>
+              <Text style={styles.heroStatValue}>{van.views ?? 0}</Text>
+            </View>
+
+            <View style={styles.heroStatBox}>
+              <Text style={styles.heroStatLabel}>Directions</Text>
+              <Text style={styles.heroStatValue}>{van.directions ?? 0}</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {isOwner ? (
+        <View style={styles.noticeCardBlue}>
+          <Text style={styles.noticeTitleBlue}>Your Listing</Text>
+          <Text style={styles.noticeTextBlue}>
+            You are viewing your own vendor listing.
+          </Text>
+        </View>
+      ) : null}
+
+      {isOwner && van.subscriptionTier === "free" ? (
+        <View style={styles.noticeCardOrange}>
+          <Text style={styles.noticeTitleOrange}>Unlock More Features</Text>
+          <Text style={styles.noticeTextOrange}>
+            Upgrade your plan to go live, add more content, strengthen branding,
+            and reach more customers.
+          </Text>
+
+          <Pressable
+            style={styles.orangeButton}
+            onPress={() => router.push("/vendor/upgrade")}
+          >
+            <Text style={styles.orangeButtonText}>Upgrade Now</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {van.listingSource === "user_spotted" ? (
+        <View style={styles.noticeCardOrange}>
+          <Text style={styles.noticeTitleOrange}>Community Spotted</Text>
+          <Text style={styles.noticeTextOrange}>
+            This listing is visible to users but not yet controlled by a vendor.
+            Claim this van to take ownership and unlock full listing features.
+          </Text>
+
+          {getExpiryText(van.expiresAt) ? (
+            <View style={styles.expiryBadge}>
+              <Text style={styles.expiryBadgeText}>
+                {getExpiryText(van.expiresAt)}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : van.owner_id ? (
+        <View style={styles.noticeCardGreen}>
+          <Text style={styles.noticeTitleGreen}>Vendor Managed</Text>
+          <Text style={styles.noticeTextGreen}>
+            This listing is managed directly by the vendor through BiteBeacon.
+          </Text>
+        </View>
+      ) : null}
+
+      {showLogoSection ? (
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionTitle}>Branding</Text>
+          <View style={styles.brandCard}>
+            <Image source={{ uri: van.logoUrl! }} style={styles.brandLogo} />
+            <View style={styles.brandTextWrap}>
+              <Text style={styles.brandTitle}>
+                {van.vendorName || van.name}
+              </Text>
+              <Text style={styles.brandText}>
+                This vendor has added branded profile assets through BiteBeacon.
+              </Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      {features.reviews && van.vendorMessage ? (
+        <View style={styles.highlightCard}>
+          <Text style={styles.highlightTitle}>Today’s Update</Text>
+          <Text style={styles.highlightText}>{van.vendorMessage}</Text>
+        </View>
+      ) : null}
+
+      {(van.foodCategories ?? []).length > 0 ? (
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionTitle}>Food Categories</Text>
+          <View style={styles.categoriesWrap}>
+            {(van.foodCategories ?? []).map((category) => (
+              <View key={category} style={styles.categoryChip}>
+                <Text style={styles.categoryChipText}>{category}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionTitle}>Vendor</Text>
+        <View style={styles.infoCard}>
+          <Text style={styles.infoText}>{van.vendorName || "Vendor name coming soon"}</Text>
+        </View>
+      </View>
+
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionTitle}>Menu</Text>
+        <View style={styles.infoCard}>
+          <Text style={styles.infoText}>{van.menu || "Menu coming soon"}</Text>
+        </View>
+
+        {van.menuPdfName ? (
+          <Pressable style={styles.secondaryButton} onPress={openMenuPdf}>
+            <Text style={styles.secondaryButtonText}>
+              View Menu PDF{van.menuPdfName ? ` (${van.menuPdfName})` : ""}
+            </Text>
+          </Pressable>
         ) : null}
       </View>
 
-      <View style={styles.statusRow}>
-        <Text style={styles.meta}>{van.cuisine}</Text>
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionTitle}>Schedule</Text>
+        <View style={styles.infoCard}>
+          <Text style={styles.infoText}>
+            {van.schedule || "Schedule coming soon"}
+          </Text>
+        </View>
+      </View>
 
-        <Text
-          style={[
-            styles.statusBadge,
-            van.temporary
-              ? styles.statusTemporary
-              : features.liveStatus
-                ? van.isLive
-                  ? styles.statusGreen
-                  : styles.statusGray
-                : styles.statusGray,
-          ]}
-        >
-          {van.temporary
-            ? "SPOTTED"
-            : features.liveStatus
-              ? van.isLive
-                ? "LIVE"
-                : "OFFLINE"
-              : "LISTED"}
-        </Text>
+      {!isOwner ? (
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionTitle}>Rate this vendor</Text>
+
+          <View style={styles.ratingRow}>
+            {[1, 2, 3, 4, 5].map((star) => (
+              <Pressable
+                key={star}
+                onPress={async () => {
+                  try {
+                    const userId = await getCurrentUserId();
+
+                    if (!userId) {
+                      Alert.alert("Login required", "Please log in to rate.");
+                      return;
+                    }
+
+                    await upsertVendorRating(id, userId, star);
+                    setUserRating(star);
+
+                    const nextAverage = await refreshVendorRating(id);
+                    const nextCount = await getVendorRatingCount(id);
+
+                    setRatingCount(nextCount);
+                    setVan((prev) => (prev ? { ...prev, rating: nextAverage } : prev));
+                  } catch {
+                    Alert.alert("Error", "Failed to submit rating");
+                  }
+                }}
+              >
+                <Text style={styles.ratingStar}>
+                  {userRating && star <= userRating ? "★" : "☆"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionTitle}>Actions</Text>
+
+        <View style={styles.actionCard}>
+          {isOwner ? (
+            <>
+              {features.liveStatus ? (
+                <Pressable
+                  style={[
+                    styles.primaryButton,
+                    van.isLive ? styles.liveActiveButton : styles.liveInactiveButton,
+                  ]}
+                  onPress={toggleLive}
+                >
+                  <Text style={styles.primaryButtonText}>
+                    {van.isLive ? "LIVE NOW" : "GO LIVE"}
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable style={styles.darkButton} onPress={openDirections}>
+                <Text style={styles.darkButtonText}>Get Directions</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.darkButton}
+                onPress={() =>
+                  router.push({
+                    pathname: "/vendor/dashboard",
+                    params: { id: van.id },
+                  })
+                }
+              >
+                <Text style={styles.darkButtonText}>Manage Listing</Text>
+              </Pressable>
+            </>
+          ) : van.listingSource === "user_spotted" &&
+            !(van.expiresAt && new Date(van.expiresAt) < new Date()) ? (
+            <>
+              <Pressable style={styles.darkButton} onPress={openDirections}>
+                <Text style={styles.darkButtonText}>Get Directions</Text>
+              </Pressable>
+
+              <Pressable style={styles.orangeButton} onPress={openClaimScreen}>
+                <Text style={styles.orangeButtonText}>Claim This Van</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable style={styles.darkButton} onPress={openDirections}>
+                <Text style={styles.darkButtonText}>Get Directions</Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.darkButton,
+                  isSavingFavourite && styles.disabledButton,
+                ]}
+                onPress={toggleFavourite}
+                disabled={isSavingFavourite}
+              >
+                <Text style={styles.darkButtonText}>
+                  {isSavingFavourite
+                    ? "Updating..."
+                    : isFavourite
+                      ? "★ Saved to Favourites"
+                      : "☆ Save to Favourites"}
+                </Text>
+              </Pressable>
+            </>
+          )}
+        </View>
       </View>
 
       {galleryPhotos.length > 0 ? (
-        <>
+        <View style={styles.sectionBlock}>
           <Text style={styles.sectionTitle}>Gallery</Text>
-
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -331,160 +743,11 @@ export default function VendorScreen() {
               />
             ))}
           </ScrollView>
-        </>
-      ) : null}
-
-      {isOwner ? (
-        <View style={styles.ownerNotice}>
-          <Text style={styles.ownerNoticeText}>
-            You are viewing your own vendor listing.
-          </Text>
         </View>
       ) : null}
-
-      {van.temporary ? (
-        <View style={styles.planHighlightCard}>
-          <Text style={styles.planHighlightTitle}>Community Spotted</Text>
-          <Text style={styles.planHighlightText}>
-            This listing has not yet been verified by BiteBeacon. If this is your
-            van, you can submit a claim for review.
-          </Text>
-        </View>
-      ) : van.owner_id ? (
-        <View style={styles.verifiedCard}>
-          <Text style={styles.verifiedCardTitle}>Vendor Managed</Text>
-          <Text style={styles.verifiedCardText}>
-            This listing is managed by the vendor through BiteBeacon.
-          </Text>
-        </View>
-      ) : van.subscriptionTier === "growth" ? (
-        <View style={styles.planHighlightCard}>
-          <Text style={styles.planHighlightTitle}>Growth Vendor</Text>
-          <Text style={styles.planHighlightText}>
-            This vendor has unlocked richer listing tools on BiteBeacon.
-          </Text>
-        </View>
-      ) : van.subscriptionTier === "pro" ? (
-        <View style={styles.planHighlightCard}>
-          <Text style={styles.planHighlightTitle}>Featured Vendor</Text>
-          <Text style={styles.planHighlightText}>
-            This vendor is part of BiteBeacon Pro and receives premium visibility.
-          </Text>
-        </View>
-      ) : null}
-
-      {features.reviews && van.vendorMessage ? (
-        <View style={styles.announcementCard}>
-          <Text style={styles.announcementTitle}>Today’s Update</Text>
-          <Text style={styles.announcementText}>{van.vendorMessage}</Text>
-        </View>
-      ) : null}
-
-      {(van.foodCategories ?? []).length > 0 ? (
-        <>
-          <Text style={styles.sectionTitle}>Food Categories</Text>
-          <View style={styles.categoriesWrap}>
-            {(van.foodCategories ?? []).map((category) => (
-              <View key={category} style={styles.categoryChip}>
-                <Text style={styles.categoryChipText}>{category}</Text>
-              </View>
-            ))}
-          </View>
-        </>
-      ) : null}
-
-      <Text style={styles.sectionTitle}>Vendor</Text>
-      <View style={styles.infoCard}>
-        <Text style={styles.text}>{van.vendorName}</Text>
-      </View>
-
-      <Text style={styles.sectionTitle}>Menu</Text>
-      <View style={styles.infoCard}>
-        <Text style={styles.text}>{van.menu}</Text>
-      </View>
-
-      {van.menuPdfName ? (
-        <Pressable style={styles.menuPdfButton} onPress={openMenuPdf}>
-          <Text style={styles.menuPdfButtonText}>
-            View Menu PDF{van.menuPdfName ? ` (${van.menuPdfName})` : ""}
-          </Text>
-        </Pressable>
-      ) : null}
-
-      <Text style={styles.sectionTitle}>Schedule</Text>
-      <View style={styles.infoCard}>
-        <Text style={styles.text}>{van.schedule}</Text>
-      </View>
-
-      {isOwner ? (
-        <>
-          {features.liveStatus ? (
-            <Pressable
-              style={[
-                styles.liveButton,
-                van.isLive ? styles.liveActive : styles.liveInactive,
-              ]}
-              onPress={toggleLive}
-            >
-              <Text style={styles.liveText}>
-                {van.isLive ? "LIVE NOW" : "GO LIVE"}
-              </Text>
-            </Pressable>
-          ) : null}
-
-          <Pressable style={styles.manageButton} onPress={openDirections}>
-            <Text style={styles.manageButtonText}>Get Directions</Text>
-          </Pressable>
-
-          <Pressable
-            style={styles.manageButton}
-            onPress={() =>
-              router.push({
-                pathname: "/vendor/dashboard",
-                params: { id: van.id },
-              })
-            }
-          >
-            <Text style={styles.manageButtonText}>Manage Listing</Text>
-          </Pressable>
-        </>
-      ) : van.temporary ? (
-        <>
-          <Pressable style={styles.manageButton} onPress={openDirections}>
-            <Text style={styles.manageButtonText}>Get Directions</Text>
-          </Pressable>
-
-          <Pressable style={styles.claimButton} onPress={openClaimScreen}>
-            <Text style={styles.claimButtonText}>Claim This Van</Text>
-          </Pressable>
-        </>
-      ) : (
-        <>
-          <Pressable style={styles.manageButton} onPress={openDirections}>
-            <Text style={styles.manageButtonText}>Get Directions</Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.manageButton,
-              isSavingFavourite && styles.disabledButton,
-            ]}
-            onPress={toggleFavourite}
-            disabled={isSavingFavourite}
-          >
-            <Text style={styles.manageButtonText}>
-              {isSavingFavourite
-                ? "Updating..."
-                : isFavourite
-                  ? "★ Saved to Favourites"
-                  : "☆ Save to Favourites"}
-            </Text>
-          </Pressable>
-        </>
-      )}
 
       <Pressable style={styles.backButton} onPress={() => router.back()}>
-        <Text style={styles.backText}>Back</Text>
+        <Text style={styles.backButtonText}>Back</Text>
       </Pressable>
     </ScrollView>
   );
@@ -493,295 +756,543 @@ export default function VendorScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F7F4F2",
+    backgroundColor: NAVY,
   },
 
   content: {
-    padding: 24,
+    paddingHorizontal: 18,
+    paddingTop: 18,
     paddingBottom: 40,
   },
 
-  notFound: {
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 20,
-    color: "#0B2A5B",
+  centeredScreen: {
+    flex: 1,
+    backgroundColor: NAVY,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
   },
 
-  titleRow: {
+  loadingText: {
+    color: WHITE,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  notFoundTitle: {
+    color: WHITE,
+    fontSize: 26,
+    fontWeight: "800",
+    marginBottom: 18,
+    textAlign: "center",
+  },
+
+  topAccent: {
+    height: 4,
+    width: 90,
+    borderRadius: 999,
+    backgroundColor: ORANGE,
+    alignSelf: "center",
+    marginBottom: 14,
+    opacity: 0.95,
+  },
+
+  heroShell: {
+    marginBottom: 18,
+    position: "relative",
+  },
+
+  heroGlow: {
+    position: "absolute",
+    top: 10,
+    left: 18,
+    right: 18,
+    height: 88,
+    borderRadius: 24,
+    backgroundColor: "rgba(255,122,0,0.14)",
+  },
+
+  heroCard: {
+    backgroundColor: PANEL,
+    borderRadius: 22,
+    padding: 14,
+    borderWidth: 1.5,
+    borderColor: ORANGE,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 6,
+  },
+
+  heroTopRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
+    alignItems: "flex-start",
     gap: 12,
-    marginBottom: 10,
+    marginBottom: 8,
+  },
+
+  heroTitleBlock: {
+    flex: 1,
+  },
+
+  heroEyebrow: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: ORANGE,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    marginBottom: 5,
+  },
+
+  heroVisual: {
+    width: 84,
+    height: 84,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: ORANGE_SOFT,
+    backgroundColor: PANEL_ALT,
+  },
+
+  title: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: WHITE,
+    marginBottom: 3,
+  },
+
+  meta: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.7)",
   },
 
   featuredBadge: {
-    backgroundColor: "#FF7A00",
-    paddingHorizontal: 12,
+    backgroundColor: ORANGE,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1.2,
+    borderColor: ORANGE_SOFT,
+  },
+
+  featuredBadgeText: {
+    color: WHITE,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  planBadge: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1.2,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+
+  planBadgeText: {
+    color: WHITE,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  heroBadgeRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+    marginBottom: 12,
+  },
+
+  statusBadge: {
+    paddingHorizontal: 11,
     paddingVertical: 6,
     borderRadius: 999,
   },
 
-  featuredBadgeText: {
-    color: "#FFFFFF",
+  statusLive: {
+    backgroundColor: GREEN,
+  },
+
+  statusOffline: {
+    backgroundColor: OFFLINE,
+  },
+
+  statusTemporary: {
+    backgroundColor: ORANGE,
+  },
+
+  statusBadgeText: {
+    color: WHITE,
     fontSize: 11,
     fontWeight: "800",
   },
 
-  title: {
-    fontSize: 30,
+  verifiedBadge: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1.2,
+    borderColor: ORANGE,
+  },
+
+  verifiedBadgeText: {
+    color: WHITE,
+    fontSize: 10,
     fontWeight: "800",
-    marginBottom: 10,
-    color: "#0B2A5B",
+  },
+
+  heroStatsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+
+  heroStatBox: {
     flex: 1,
-  },
-
-  meta: {
-    fontSize: 16,
-    color: "#666",
-    marginBottom: 20,
-  },
-
-  galleryRow: {
-    paddingRight: 12,
-    marginBottom: 18,
-  },
-
-  galleryImage: {
-    width: 260,
-    height: 190,
-    borderRadius: 18,
-    marginRight: 12,
-    backgroundColor: "#E9E9E9",
-  },
-
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginTop: 18,
-    marginBottom: 8,
-    color: "#0B2A5B",
-  },
-
-  text: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: "#222222",
-  },
-
-  liveButton: {
-    marginTop: 30,
-    paddingVertical: 14,
+    backgroundColor: PANEL_DEEP,
     borderRadius: 16,
-    alignItems: "center",
-  },
-
-  liveActive: {
-    backgroundColor: "#1DB954",
-  },
-
-  liveInactive: {
-    backgroundColor: "#999",
-  },
-
-  liveText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-  },
-
-  manageButton: {
-    marginTop: 14,
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-    backgroundColor: "#0B2A5B",
-  },
-
-  claimButton: {
-    marginTop: 14,
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-    backgroundColor: "#FF7A00",
-  },
-
-  claimButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-  },
-
-  menuPdfButton: {
-    marginTop: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    paddingVertical: 10,
+    paddingHorizontal: 8,
     borderWidth: 1,
-    borderColor: "#0B2A5B",
+    borderColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
   },
 
-  menuPdfButtonText: {
-    color: "#0B2A5B",
-    fontWeight: "700",
+  heroStatLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "rgba(255,255,255,0.58)",
+    textTransform: "uppercase",
+    marginBottom: 4,
     textAlign: "center",
   },
 
-  disabledButton: {
-    opacity: 0.7,
+  heroStatValue: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: WHITE,
   },
 
-  manageButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
+  sectionBlock: {
+    marginBottom: 22,
   },
 
-  backButton: {
-    marginTop: 16,
-    paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: "center",
-    backgroundColor: "#D9D9D9",
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: WHITE,
+    marginBottom: 10,
   },
 
-  backText: {
-    fontWeight: "700",
+  noticeCardBlue: {
+    backgroundColor: NAVY_DARK,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1.5,
+    borderColor: ORANGE,
   },
 
-  statusRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 20,
-    gap: 12,
-  },
-
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    color: "#fff",
-    fontWeight: "700",
-  },
-
-  statusGreen: {
-    backgroundColor: "#1DB954",
-  },
-
-  statusGray: {
-    backgroundColor: "#888",
-  },
-
-  statusTemporary: {
-    backgroundColor: "#FF7A00",
-  },
-
-  announcementCard: {
-    backgroundColor: "#FFF8E1",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: "#FF7A00",
-  },
-
-  announcementTitle: {
+  noticeTitleBlue: {
     fontSize: 15,
     fontWeight: "800",
-    color: "#8A4B00",
+    color: WHITE,
+    marginBottom: 4,
+  },
+
+  noticeTextBlue: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: TEXT_MUTED,
+  },
+
+  noticeCardOrange: {
+    backgroundColor: "rgba(255,122,0,0.1)",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1.5,
+    borderColor: ORANGE,
+  },
+
+  noticeTitleOrange: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: ORANGE,
+    marginBottom: 4,
+  },
+
+  noticeTextOrange: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "rgba(255,255,255,0.82)",
+  },
+
+  noticeCardGreen: {
+    backgroundColor: "rgba(29,185,84,0.1)",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1.5,
+    borderColor: GREEN,
+  },
+
+  noticeTitleGreen: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: GREEN,
+    marginBottom: 4,
+  },
+
+  noticeTextGreen: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "rgba(255,255,255,0.82)",
+  },
+
+  highlightCard: {
+    backgroundColor: PANEL,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1.5,
+    borderColor: ORANGE,
+    overflow: "hidden",
+  },
+
+  highlightTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: ORANGE,
     marginBottom: 6,
   },
 
-  announcementText: {
+  highlightText: {
     fontSize: 14,
-    color: "#6D4C00",
     lineHeight: 20,
+    color: "rgba(255,255,255,0.86)",
   },
 
-  planHighlightCard: {
-    backgroundColor: "#FFF3E0",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: "#FF7A00",
-  },
-
-  planHighlightTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#8A4B00",
-    marginBottom: 4,
-  },
-
-  planHighlightText: {
-    fontSize: 14,
-    color: "#8A4B00",
-    lineHeight: 20,
-  },
-
-  verifiedCard: {
-    backgroundColor: "#E8F5E9",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: "#1DB954",
-  },
-
-  verifiedCardTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#166534",
-    marginBottom: 4,
-  },
-
-  verifiedCardText: {
-    fontSize: 14,
-    color: "#166534",
-    lineHeight: 20,
-  },
-
-  infoCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
+  brandCard: {
+    backgroundColor: PANEL_ALT,
+    borderRadius: 20,
     padding: 16,
-    marginTop: 4,
-    borderWidth: 2,
-    borderColor: "#FF7A00",
+    borderWidth: 1.2,
+    borderColor: ORANGE,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
   },
 
-  ownerNotice: {
-    backgroundColor: "#E8F0FE",
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: "#FF7A00",
+  brandLogo: {
+    width: 72,
+    height: 72,
+    borderRadius: 18,
+    backgroundColor: WHITE,
+    borderWidth: 1.2,
+    borderColor: "rgba(255,255,255,0.2)",
   },
 
-  ownerNoticeText: {
-    color: "#0B2A5B",
-    fontWeight: "600",
+  brandTextWrap: {
+    flex: 1,
+  },
+
+  brandTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: WHITE,
+    marginBottom: 4,
+  },
+
+  brandText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "rgba(255,255,255,0.82)",
   },
 
   categoriesWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10,
-    marginBottom: 8,
   },
 
   categoryChip: {
-    backgroundColor: "#0B2A5B",
+    backgroundColor: PANEL_ALT,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: ORANGE,
   },
 
   categoryChipText: {
-    color: "#FFFFFF",
+    color: WHITE,
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: "800",
+  },
+
+  infoCard: {
+    backgroundColor: PANEL_ALT,
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1.2,
+    borderColor: ORANGE,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+
+  infoText: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: "rgba(255,255,255,0.9)",
+  },
+
+  ratingRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+
+  ratingStar: {
+    fontSize: 28,
+    color: WHITE,
+  },
+
+  actionCard: {
+    backgroundColor: NAVY_DARK,
+    borderRadius: 22,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: ORANGE,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 4,
+  },
+
+  primaryButton: {
+    paddingVertical: 15,
+    borderRadius: 16,
+    alignItems: "center",
+    marginBottom: 12,
+    borderWidth: 1.5,
+  },
+
+  primaryButtonText: {
+    color: WHITE,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+
+  liveActiveButton: {
+    backgroundColor: GREEN,
+    borderColor: "rgba(255,255,255,0.22)",
+  },
+
+  liveInactiveButton: {
+    backgroundColor: OFFLINE,
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+
+  darkButton: {
+    backgroundColor: PANEL_DEEP,
+    paddingVertical: 15,
+    borderRadius: 16,
+    alignItems: "center",
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: ORANGE,
+  },
+
+  darkButtonText: {
+    color: WHITE,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  orangeButton: {
+    backgroundColor: ORANGE,
+    paddingVertical: 15,
+    borderRadius: 16,
+    alignItems: "center",
+    marginTop: 2,
+    borderWidth: 1.5,
+    borderColor: ORANGE_SOFT,
+  },
+
+  orangeButtonText: {
+    color: WHITE,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  secondaryButton: {
+    marginTop: 12,
+    backgroundColor: PANEL_ALT,
+    borderWidth: 1.2,
+    borderColor: ORANGE,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+  },
+
+  secondaryButtonText: {
+    color: WHITE,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+
+  galleryRow: {
+    paddingRight: 8,
+  },
+
+  galleryImage: {
+    width: 270,
+    height: 190,
+    borderRadius: 20,
+    marginRight: 12,
+    backgroundColor: PANEL,
+    borderWidth: 1.5,
+    borderColor: ORANGE,
+  },
+
+  backButton: {
+    backgroundColor: PANEL_ALT,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+    marginTop: 2,
+    borderWidth: 1.2,
+    borderColor: ORANGE,
+  },
+
+  backButtonText: {
+    color: WHITE,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  disabledButton: {
+    opacity: 0.7,
+  },
+
+  expiryBadge: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+    backgroundColor: "#FF7A00",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+
+  expiryBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "800",
   },
 });

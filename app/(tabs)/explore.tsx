@@ -38,18 +38,9 @@ const DEFAULT_REGION: Region = {
 };
 
 const BITEBEACON_MAP_STYLE = [
-  {
-    elementType: "geometry",
-    stylers: [{ color: "#eaf0f6" }],
-  },
-  {
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#355070" }],
-  },
-  {
-    elementType: "labels.text.stroke",
-    stylers: [{ color: "#ffffff" }],
-  },
+  { elementType: "geometry", stylers: [{ color: "#eaf0f6" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#355070" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }] },
   {
     featureType: "administrative",
     elementType: "geometry.stroke",
@@ -103,25 +94,52 @@ const BITEBEACON_MAP_STYLE = [
 ];
 
 function getMarkerImage(van: Van) {
-  if (van.temporary) return markerSpotted;
+  if (van.listingSource === "user_spotted") return markerSpotted;
   if (van.subscriptionTier === "pro") return markerFeatured;
-  if (getSubscriptionFeatures(van.subscriptionTier).liveStatus && van.isLive) {
-    return markerLive;
-  }
+  if (van.owner_id && van.isLive) return markerLive;
   return markerOffline;
 }
 
 function getStatusLabel(van: Van) {
-  if (van.temporary) return "SPOTTED";
+  if (van.listingSource === "user_spotted") return "SPOTTED";
   if (getSubscriptionFeatures(van.subscriptionTier).liveStatus) {
     return van.isLive ? "LIVE" : "LISTED";
   }
+
   return "LISTED";
+}
+
+function getCardImage(van: Van) {
+  if (van.logoUrl) return van.logoUrl;
+
+  const safePhotos = Array.isArray(van.photos) ? van.photos : [];
+
+  if (safePhotos.length > 0) {
+    return safePhotos[0];
+  }
+
+  return van.photo ?? null;
+}
+
+function matchesSearchQuery(van: Van, query: string) {
+  const search = query.trim().toLowerCase();
+
+  if (!search) return true;
+
+  return (
+    van.name.toLowerCase().includes(search) ||
+    (van.vendorName ?? "").toLowerCase().includes(search) ||
+    van.cuisine.toLowerCase().includes(search) ||
+    (van.foodCategories ?? []).some((category) =>
+      category.toLowerCase().includes(search)
+    )
+  );
 }
 
 export default function MapScreen() {
   const params = useLocalSearchParams();
   const mapRef = useRef<MapView | null>(null);
+  const hasAnimatedToUserLocation = useRef(false);
 
   const [spotVisible, setSpotVisible] = useState(false);
   const [spotMode, setSpotMode] = useState(false);
@@ -131,9 +149,11 @@ export default function MapScreen() {
   const [selectedSpotPin, setSelectedSpotPin] = useState<SpotPin | null>(null);
   const [selectedVan, setSelectedVan] = useState<Van | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<FilterType>("all");
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [userRegion, setUserRegion] = useState<Region>(DEFAULT_REGION);
-  const [locationReady, setLocationReady] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
 
   const selectedMarkerScale = useRef(new Animated.Value(1)).current;
   const cardTranslateY = useRef(new Animated.Value(20)).current;
@@ -167,7 +187,10 @@ export default function MapScreen() {
       };
 
       setUserRegion(nextRegion);
-      mapRef.current?.animateToRegion(nextRegion, 700);
+
+      if (mapReady) {
+        mapRef.current?.animateToRegion(nextRegion, 700);
+      }
       return;
     }
 
@@ -191,8 +214,11 @@ export default function MapScreen() {
     };
 
     setUserRegion(nextRegion);
-    mapRef.current?.animateToRegion(nextRegion, 700);
-  }, [params.lat, params.lng, params.highlight, supabaseVans]);
+
+    if (mapReady) {
+      mapRef.current?.animateToRegion(nextRegion, 700);
+    }
+  }, [params.lat, params.lng, params.highlight, supabaseVans, mapReady]);
 
   useEffect(() => {
     if (!selectedVan) {
@@ -251,22 +277,26 @@ export default function MapScreen() {
       const permission = await Location.requestForegroundPermissionsAsync();
 
       if (permission.status !== "granted") {
-        setLocationReady(true);
         return;
       }
 
       const current = await Location.getCurrentPositionAsync({});
 
-      setUserRegion({
+      const nextRegion: Region = {
         latitude: current.coords.latitude,
         longitude: current.coords.longitude,
         latitudeDelta: 0.05,
         longitudeDelta: 0.05,
-      });
+      };
 
-      setLocationReady(true);
+      setUserRegion(nextRegion);
+
+      if (mapReady && !hasAnimatedToUserLocation.current) {
+        mapRef.current?.animateToRegion(nextRegion, 600);
+        hasAnimatedToUserLocation.current = true;
+      }
     } catch {
-      setLocationReady(true);
+      // keep default region
     }
   }
 
@@ -279,6 +309,10 @@ export default function MapScreen() {
     }
   }
 
+  const liveVendorCount = useMemo(() => {
+    return supabaseVans.filter((van) => van.isLive && !van.temporary).length;
+  }, [supabaseVans]);
+
   const filteredVans = useMemo(() => {
     const baseVans =
       selectedFilter === "live"
@@ -287,7 +321,11 @@ export default function MapScreen() {
           ? supabaseVans.filter((van) => van.temporary)
           : supabaseVans;
 
-    return [...baseVans].sort((a, b) => {
+    const searchedVans = searchQuery.trim()
+      ? baseVans.filter((van) => matchesSearchQuery(van, searchQuery))
+      : baseVans;
+
+    return [...searchedVans].sort((a, b) => {
       const tierRank = { pro: 3, growth: 2, free: 1 };
 
       const aRank = tierRank[a.subscriptionTier ?? "free"];
@@ -297,9 +335,12 @@ export default function MapScreen() {
         return bRank - aRank;
       }
 
+      if (a.isLive && !b.isLive) return -1;
+      if (!a.isLive && b.isLive) return 1;
+
       return b.rating - a.rating;
     });
-  }, [supabaseVans, selectedFilter]);
+  }, [supabaseVans, selectedFilter, searchQuery]);
 
   useEffect(() => {
     if (!selectedVan) return;
@@ -335,6 +376,17 @@ export default function MapScreen() {
       setSelectedVan(null);
       setSpotMode(false);
       setSpotVisible(true);
+
+      mapRef.current?.animateToRegion(
+        {
+          latitude,
+          longitude,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        },
+        350
+      );
+
       return;
     }
 
@@ -389,6 +441,8 @@ export default function MapScreen() {
       return;
     }
 
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
     const newVan: Van = {
       id: `spotted-${Date.now()}`,
       name: spotName.trim(),
@@ -397,6 +451,7 @@ export default function MapScreen() {
       lat: selectedSpotPin.latitude,
       lng: selectedSpotPin.longitude,
       temporary: true,
+      listingSource: "user_spotted",
       photo: null,
       vendorName: "Community spotted",
       menu: "Claim this van to add menu",
@@ -410,6 +465,7 @@ export default function MapScreen() {
     };
 
     try {
+
       await createVendor({
         id: newVan.id,
         name: newVan.name,
@@ -421,6 +477,8 @@ export default function MapScreen() {
         lng: newVan.lng,
         photo: null,
         temporary: true,
+        listingSource: "user_spotted",
+        expiresAt,
         isLive: false,
         owner_id: null,
         views: 0,
@@ -431,6 +489,7 @@ export default function MapScreen() {
       });
 
       await loadSupabaseVans();
+      setSelectedVan(null);
       cancelSpotFlow();
       Alert.alert("Success", "Spotted van added to the BiteBeacon map.");
     } catch (error) {
@@ -454,122 +513,179 @@ export default function MapScreen() {
     mapRef.current?.animateToRegion(userRegion, 600);
   }
 
+  function closeSearch() {
+    setSearchQuery("");
+    setSearchVisible(false);
+  }
+
   return (
     <View style={styles.container}>
-      {locationReady ? (
-        <MapView
-          ref={mapRef}
-          style={styles.map}
-          initialRegion={userRegion}
-          showsUserLocation
-          showsMyLocationButton={false}
-          customMapStyle={BITEBEACON_MAP_STYLE}
-          onPress={handleMapPress}
-        >
-          {filteredVans.map((van) => {
-            const isSelected = selectedVan?.id === van.id;
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        initialRegion={DEFAULT_REGION}
+        showsUserLocation
+        showsMyLocationButton={false}
+        customMapStyle={BITEBEACON_MAP_STYLE}
+        onPress={handleMapPress}
+        onMapReady={() => {
+          setMapReady(true);
 
-            return (
-              <Marker
-                key={van.id}
-                coordinate={{ latitude: van.lat, longitude: van.lng }}
-                onPress={() => handleMarkerPress(van)}
+          if (!hasAnimatedToUserLocation.current) {
+            mapRef.current?.animateToRegion(userRegion, 450);
+            hasAnimatedToUserLocation.current = true;
+          }
+        }}
+      >
+        {filteredVans.map((van) => {
+          const isSelected = selectedVan?.id === van.id;
+
+          return (
+            <Marker
+              key={van.id}
+              coordinate={{ latitude: van.lat, longitude: van.lng }}
+              onPress={() => handleMarkerPress(van)}
+            >
+              <Animated.View
+                style={{
+                  transform: [
+                    {
+                      scale: isSelected
+                        ? selectedMarkerScale
+                        : van.isLive
+                          ? 1.15
+                          : 1,
+                    },
+                  ],
+                }}
               >
-                <Animated.View
-                  style={
-                    isSelected
-                      ? { transform: [{ scale: selectedMarkerScale }] }
-                      : undefined
-                  }
-                >
-                  <Image
-                    source={getMarkerImage(van)}
-                    style={styles.markerImage}
-                    resizeMode="contain"
-                  />
-                </Animated.View>
-              </Marker>
-            );
-          })}
-
-          {selectedSpotPin ? (
-            <Marker coordinate={selectedSpotPin}>
-              <Image
-                source={markerSpotted}
-                style={styles.markerImage}
-                resizeMode="contain"
-              />
+                <Image
+                  source={getMarkerImage(van)}
+                  style={[
+                    styles.markerImage,
+                    van.isLive && {
+                      shadowColor: "#1DB954",
+                      shadowOpacity: 0.8,
+                      shadowRadius: 10,
+                      shadowOffset: { width: 0, height: 0 },
+                    },
+                  ]}
+                  resizeMode="contain"
+                />
+              </Animated.View>
             </Marker>
-          ) : null}
-        </MapView>
-      ) : (
-        <View style={styles.loadingWrap}>
+          );
+        })}
+
+        {selectedSpotPin ? (
+          <Marker coordinate={selectedSpotPin}>
+            <Image
+              source={markerSpotted}
+              style={styles.markerImage}
+              resizeMode="contain"
+            />
+          </Marker>
+        ) : null}
+      </MapView>
+
+      {!mapReady ? (
+        <View style={styles.loadingOverlay}>
           <Text style={styles.loadingText}>Loading map...</Text>
         </View>
-      )}
+      ) : null}
 
       <View style={styles.topOverlay}>
-        <View style={styles.filterBar}>
-          <Pressable
-            style={[
-              styles.filterChip,
-              selectedFilter === "all" && styles.filterChipActive,
-            ]}
-            onPress={() => {
-              setSelectedFilter("all");
-              setSelectedVan(null);
-            }}
-          >
-            <Text
+        <View style={styles.topControlsRow}>
+          <View style={styles.filterBar}>
+            <Pressable
               style={[
-                styles.filterChipText,
-                selectedFilter === "all" && styles.filterChipTextActive,
+                styles.filterChip,
+                selectedFilter === "all" && styles.filterChipActive,
               ]}
+              onPress={() => {
+                setSelectedFilter("all");
+                setSelectedVan(null);
+              }}
             >
-              All
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.filterChipText,
+                  selectedFilter === "all" && styles.filterChipTextActive,
+                ]}
+              >
+                All
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.filterChip,
+                selectedFilter === "live" && styles.filterChipActive,
+              ]}
+              onPress={() => {
+                setSelectedFilter("live");
+                setSelectedVan(null);
+              }}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  selectedFilter === "live" && styles.filterChipTextActive,
+                ]}
+              >
+                Live ({liveVendorCount})
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.filterChip,
+                selectedFilter === "spotted" && styles.filterChipActive,
+              ]}
+              onPress={() => {
+                setSelectedFilter("spotted");
+                setSelectedVan(null);
+              }}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  selectedFilter === "spotted" && styles.filterChipTextActive,
+                ]}
+              >
+                Spotted
+              </Text>
+            </Pressable>
+          </View>
 
           <Pressable
-            style={[
-              styles.filterChip,
-              selectedFilter === "live" && styles.filterChipActive,
-            ]}
+            style={styles.searchIconButton}
             onPress={() => {
-              setSelectedFilter("live");
-              setSelectedVan(null);
+              if (searchVisible) {
+                closeSearch();
+              } else {
+                setSearchVisible(true);
+              }
             }}
           >
-            <Text
-              style={[
-                styles.filterChipText,
-                selectedFilter === "live" && styles.filterChipTextActive,
-              ]}
-            >
-              Live
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.filterChip,
-              selectedFilter === "spotted" && styles.filterChipActive,
-            ]}
-            onPress={() => {
-              setSelectedFilter("spotted");
-              setSelectedVan(null);
-            }}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                selectedFilter === "spotted" && styles.filterChipTextActive,
-              ]}
-            >
-              Spotted
+            <Text style={styles.searchIconText}>
+              {searchVisible ? "✕" : "🔍"}
             </Text>
           </Pressable>
         </View>
+
+        {searchVisible ? (
+          <View style={styles.searchRow}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search vendor or cuisine"
+              placeholderTextColor="rgba(0,0,0,0.45)"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+            />
+          </View>
+        ) : null}
 
         {!legendOpen ? (
           <Pressable
@@ -650,25 +766,43 @@ export default function MapScreen() {
             onPress={() => openVanPage(selectedVan)}
           >
             <View style={styles.bottomCardTopRow}>
-              <View style={styles.bottomCardTitleBlock}>
-                <View style={styles.bottomCardTitleRow}>
-                  <Text style={styles.bottomCardTitle}>{selectedVan.name}</Text>
+              <View style={styles.bottomCardInfoRow}>
+                {getCardImage(selectedVan) ? (
+                  <Image
+                    source={{ uri: getCardImage(selectedVan)! }}
+                    style={styles.bottomCardImage}
+                  />
+                ) : null}
 
-                  {selectedVan.subscriptionTier === "pro" ? (
-                    <View style={styles.bottomCardFeaturedBadge}>
-                      <Text style={styles.bottomCardFeaturedBadgeText}>
-                        FEATURED
-                      </Text>
-                    </View>
-                  ) : null}
+                <View style={styles.bottomCardTitleBlock}>
+                  <View style={styles.bottomCardTitleRow}>
+                    <Text style={styles.bottomCardTitle}>{selectedVan.name}</Text>
+
+                    {selectedVan.owner_id && !selectedVan.temporary ? (
+                      <View style={styles.bottomCardFeaturedBadge}>
+                        <Text style={styles.bottomCardFeaturedBadgeText}>
+                          VERIFIED
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {selectedVan.subscriptionTier === "pro" ? (
+                      <View style={styles.bottomCardFeaturedBadge}>
+                        <Text style={styles.bottomCardFeaturedBadgeText}>
+                          FEATURED
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <Text style={styles.bottomCardMeta}>{selectedVan.cuisine}</Text>
+
+                  <Text style={styles.bottomCardTrustText}>
+                    {selectedVan.listingSource === "user_spotted"
+                      ? "Community spotted listing"
+                      : "Vendor-managed listing"}
+                  </Text>
                 </View>
-
-                <Text style={styles.bottomCardMeta}>{selectedVan.cuisine}</Text>
-                <Text style={styles.bottomCardTrustText}>
-                  {selectedVan.temporary
-                    ? "Community spotted listing"
-                    : "Vendor-managed listing"}
-                </Text>
               </View>
 
               <View
@@ -794,17 +928,26 @@ const styles = StyleSheet.create({
     height: 48,
   },
 
-  loadingWrap: {
-    flex: 1,
+  loadingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#0B2A5B",
+    backgroundColor: "rgba(11,42,91,0.08)",
+    pointerEvents: "none",
   },
 
   loadingText: {
     fontSize: 16,
     fontWeight: "700",
     color: "#FFFFFF",
+    backgroundColor: "rgba(11,42,91,0.76)",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
   },
 
   topOverlay: {
@@ -815,10 +958,59 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
 
+  topControlsRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 10,
+  },
+
   filterBar: {
     flexDirection: "row",
     gap: 10,
+    flex: 1,
+    flexWrap: "wrap",
+  },
+
+  searchRow: {
     marginBottom: 10,
+  },
+
+  searchInput: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+    color: "#222222",
+    fontWeight: "600",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+
+  searchIconButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+
+  searchIconText: {
+    fontSize: 20,
   },
 
   filterChip: {
@@ -1004,6 +1196,22 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
     marginBottom: 12,
+  },
+
+  bottomCardInfoRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    flex: 1,
+  },
+
+  bottomCardImage: {
+    width: 58,
+    height: 58,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "#FF7A00",
   },
 
   bottomCardTitleBlock: {

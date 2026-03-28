@@ -50,8 +50,8 @@ export default function FavouritesScreen() {
 
       const allVendors = await getAllVendors();
 
-      const filteredFavourites = allVendors.filter((vendor) =>
-        favouriteVendorIds.includes(vendor.id)
+      const filteredFavourites = allVendors.filter(
+        (vendor) => favouriteVendorIds.includes(vendor.id) && !vendor.isSuspended
       );
 
       setFavouriteVans(filteredFavourites);

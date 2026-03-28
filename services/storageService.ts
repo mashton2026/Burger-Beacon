@@ -3,10 +3,15 @@ import { supabase } from "../lib/supabase";
 
 function getFileExtension(value: string, fallback: string) {
     const cleanValue = value.split("?")[0];
+
+    if (!cleanValue.includes(".")) {
+        return fallback;
+    }
+
     const parts = cleanValue.split(".");
     const extension = parts[parts.length - 1]?.toLowerCase();
 
-    if (!extension || extension === cleanValue.toLowerCase()) {
+    if (!extension) {
         return fallback;
     }
 
@@ -41,8 +46,13 @@ export async function uploadVendorPhotos(
 
     for (let index = 0; index < photoUris.length; index += 1) {
         const uri = photoUris[index];
+
         const extension = getFileExtension(uri, "jpg");
-        const filePath = `${userId}/${Date.now()}-${index}.${extension}`;
+
+        const filePath = `${userId}/${Date.now()}-${index}-${Math.random()
+            .toString(36)
+            .slice(2, 8)}.${extension}`;
+
         const fileBody = await fileUriToArrayBuffer(uri);
 
         const contentType =
@@ -65,7 +75,9 @@ export async function uploadVendorPhotos(
             throw new Error(error.message);
         }
 
-        const { data } = supabase.storage.from("vendor-photos").getPublicUrl(filePath);
+        const { data } = supabase.storage
+            .from("vendor-photos")
+            .getPublicUrl(filePath);
 
         uploadedUrls.push(data.publicUrl);
     }
@@ -83,8 +95,13 @@ export async function uploadVendorMenuPdf(
     signedUrl: string | null;
 }> {
     const finalFileName = fileName?.trim() || "menu.pdf";
+
     const extension = getFileExtension(finalFileName, "pdf");
-    const storagePath = `${userId}/${Date.now()}-menu.${extension}`;
+
+    const storagePath = `${userId}/${Date.now()}-menu-${Math.random()
+        .toString(36)
+        .slice(2, 8)}.${extension}`;
+
     const fileBody = await fileUriToArrayBuffer(fileUri);
 
     const { error } = await supabase.storage
@@ -119,4 +136,47 @@ export async function getVendorMenuPdfSignedUrl(
     }
 
     return data.signedUrl;
+}
+
+export async function uploadVendorLogo(
+    userId: string,
+    fileUri: string
+): Promise<{
+    publicUrl: string;
+    storagePath: string;
+}> {
+    const extension = getFileExtension(fileUri, "png");
+
+    const filePath = `${userId}/logo-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}.${extension}`;
+
+    const fileBody = await fileUriToArrayBuffer(fileUri);
+
+    const contentType =
+        extension === "png"
+            ? "image/png"
+            : extension === "webp"
+                ? "image/webp"
+                : "image/jpeg";
+
+    const { error } = await supabase.storage
+        .from("vendor-logos")
+        .upload(filePath, fileBody, {
+            contentType,
+            upsert: true,
+        });
+
+    if (error) {
+        throw new Error(error.message);
+    }
+
+    const { data } = supabase.storage
+        .from("vendor-logos")
+        .getPublicUrl(filePath);
+
+    return {
+        publicUrl: data.publicUrl,
+        storagePath: filePath,
+    };
 }

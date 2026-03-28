@@ -57,6 +57,15 @@ export default function ClaimVendorScreen() {
                 return;
             }
 
+            if (vendor.isSuspended) {
+                Alert.alert(
+                    "Unavailable",
+                    "This spotted van is not available for claiming."
+                );
+                router.back();
+                return;
+            }
+
             if (!vendor.temporary) {
                 Alert.alert(
                     "Already claimed",

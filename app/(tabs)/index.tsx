@@ -10,6 +10,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -63,12 +64,28 @@ function matchesFoodCategory(van: Van, category: string) {
   );
 }
 
+function matchesSearchQuery(van: Van, query: string) {
+  const search = normalizeText(query);
+
+  if (!search) return true;
+
+  const inName = normalizeText(van.name).includes(search);
+  const inVendorName = normalizeText(van.vendorName).includes(search);
+  const inCuisine = normalizeText(van.cuisine).includes(search);
+  const inCategories = (van.foodCategories ?? []).some((category) =>
+    normalizeText(category).includes(search)
+  );
+
+  return inName || inVendorName || inCuisine || inCategories;
+}
+
 export default function HomeScreen() {
   const [supabaseVans, setSupabaseVans] = useState<Van[]>([]);
   const [customVans, setCustomVans] = useState<Van[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<BrowseFilter>("ALL");
   const [selectedFoodCategory, setSelectedFoodCategory] =
     useState<string>("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
   const [userLocation, setUserLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -147,10 +164,26 @@ export default function HomeScreen() {
 
   const allVans: Van[] = [...supabaseVans, ...customVans];
 
+  const visibleVans = useMemo(() => {
+    return allVans.filter((van) => {
+      if (van.isSuspended) return false;
+
+      if (
+        van.listingSource === "user_spotted" &&
+        van.expiresAt &&
+        new Date(van.expiresAt) < new Date()
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [allVans]);
+
   const foodCategories = useMemo(() => {
     const discoveredCategories = new Set<string>();
 
-    allVans.forEach((van) => {
+    visibleVans.forEach((van) => {
       (van.foodCategories ?? []).forEach((category) => {
         const cleaned = category.trim();
         if (cleaned) {
@@ -159,11 +192,16 @@ export default function HomeScreen() {
       });
     });
 
-    return ["ALL", ...Array.from(discoveredCategories).sort((a, b) => a.localeCompare(b))];
-  }, [allVans]);
+    return [
+      "ALL",
+      ...Array.from(discoveredCategories).sort((a, b) =>
+        a.localeCompare(b)
+      ),
+    ];
+  }, [visibleVans]);
 
   const filteredVans = useMemo(() => {
-    let workingVans = [...allVans];
+    let workingVans = [...visibleVans];
 
     if (selectedFilter === "LIVE NOW") {
       workingVans = workingVans.filter(
@@ -179,6 +217,12 @@ export default function HomeScreen() {
     if (selectedFoodCategory !== "ALL") {
       workingVans = workingVans.filter((van) =>
         matchesFoodCategory(van, selectedFoodCategory)
+      );
+    }
+
+    if (searchQuery.trim()) {
+      workingVans = workingVans.filter((van) =>
+        matchesSearchQuery(van, searchQuery)
       );
     }
 
@@ -228,10 +272,16 @@ export default function HomeScreen() {
     });
 
     return sortedVans;
-  }, [allVans, selectedFilter, selectedFoodCategory, userLocation]);
+  }, [
+    visibleVans,
+    selectedFilter,
+    selectedFoodCategory,
+    searchQuery,
+    userLocation,
+  ]);
 
   const liveNowVans = useMemo(() => {
-    return [...allVans]
+    return [...visibleVans]
       .filter(
         (van) =>
           getSubscriptionFeatures(van.subscriptionTier).liveStatus && van.isLive
@@ -268,10 +318,10 @@ export default function HomeScreen() {
         return b.rating - a.rating;
       })
       .slice(0, 6);
-  }, [allVans, userLocation]);
+  }, [visibleVans, userLocation]);
 
   const featuredProVans = useMemo(() => {
-    return [...allVans]
+    return [...visibleVans]
       .filter((van) => van.subscriptionTier === "pro")
       .sort((a, b) => {
         if (userLocation) {
@@ -297,7 +347,7 @@ export default function HomeScreen() {
         return b.rating - a.rating;
       })
       .slice(0, 4);
-  }, [allVans, userLocation]);
+  }, [visibleVans, userLocation]);
 
   function getVendorDistance(van: Van) {
     if (!userLocation) return null;
@@ -321,8 +371,6 @@ export default function HomeScreen() {
           <Text style={styles.liveCardBadge}>LIVE</Text>
           {van.subscriptionTier === "pro" ? (
             <Text style={styles.liveCardFeatured}>FEATURED</Text>
-          ) : van.subscriptionTier === "growth" ? (
-            <Text style={styles.liveCardGrowth}>GROWTH</Text>
           ) : null}
         </View>
 
@@ -346,40 +394,66 @@ export default function HomeScreen() {
     );
   }
 
-  function renderFoodCategoryCard(category: string) {
+  function renderFoodCategoryChip(category: string) {
     const isActive = selectedFoodCategory === category;
 
     return (
       <Pressable
         key={category}
         style={[
-          styles.foodCategoryCard,
-          isActive && styles.foodCategoryCardActive,
+          styles.foodCategoryChip,
+          isActive && styles.foodCategoryChipActive,
         ]}
         onPress={() => setSelectedFoodCategory(category)}
       >
         <Text
           style={[
-            styles.foodCategoryCardTitle,
-            isActive && styles.foodCategoryCardTitleActive,
+            styles.foodCategoryChipText,
+            isActive && styles.foodCategoryChipTextActive,
           ]}
         >
           {category}
         </Text>
-
-        <Text
-          style={[
-            styles.foodCategoryCardText,
-            isActive && styles.foodCategoryCardTextActive,
-          ]}
-        >
-          {category === "ALL"
-            ? "Browse every food type"
-            : `See ${category.toLowerCase()} vendors`}
-        </Text>
       </Pressable>
     );
   }
+
+  function renderFeaturedVendorCard(van: Van) {
+    return (
+      <Pressable
+        key={`featured-${van.id}`}
+        style={styles.featuredCard}
+        onPress={() => router.push(`/vendor/${van.id}`)}
+      >
+        <View style={styles.featuredCardGlow} />
+        <View style={styles.featuredCardHeader}>
+          <Text style={styles.featuredCardBadge}>FEATURED</Text>
+          {getVendorDistance(van) !== null ? (
+            <Text style={styles.featuredCardDistance}>
+              {getVendorDistance(van)?.toFixed(1)} mi
+            </Text>
+          ) : null}
+        </View>
+
+        <Text style={styles.featuredCardTitle} numberOfLines={1}>
+          {van.name}
+        </Text>
+
+        <Text style={styles.featuredCardMeta} numberOfLines={1}>
+          {van.cuisine}
+        </Text>
+
+        <View style={styles.featuredCardFooter}>
+          <Text style={styles.featuredCardRating}>★ {van.rating.toFixed(1)}</Text>
+          {van.vendorMessage?.trim() ? (
+            <Text style={styles.featuredCardDeal}>DEAL</Text>
+          ) : null}
+        </View>
+      </Pressable>
+    );
+  }
+
+  const showEmptyState = filteredVans.length === 0;
 
   return (
     <View style={styles.container}>
@@ -409,11 +483,12 @@ export default function HomeScreen() {
                 },
               ]}
             >
-              <Text style={styles.aboutGreeting}>To BiteBeaconeers,</Text>
+              <Text style={styles.aboutGreeting}>To BiteBeacon users,</Text>
 
               <Text style={styles.aboutText}>
-                Built to make street food easier to find and support local vendors.
-                Discover what’s live, nearby, and actually worth the trip.
+                I built BiteBeacon to make street food easier to find, support
+                local vendors, and help more people discover what is worth the
+                trip.
               </Text>
 
               <Text style={styles.aboutSignature}>— Founder</Text>
@@ -440,6 +515,23 @@ export default function HomeScreen() {
               </View>
             ) : null}
 
+            <View style={styles.sectionBlock}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Browse by Food</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Find vendors by the food you want most
+                </Text>
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.foodCategoryRow}
+              >
+                {foodCategories.map(renderFoodCategoryChip)}
+              </ScrollView>
+            </View>
+
             {featuredProVans.length > 0 ? (
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionHeader}>
@@ -449,25 +541,26 @@ export default function HomeScreen() {
                   </Text>
                 </View>
 
-                {featuredProVans.map((item) => (
-                  <BurgerVanCard
-                    key={`featured-${item.id}`}
-                    id={item.id}
-                    name={item.name}
-                    cuisine={item.cuisine}
-                    rating={item.rating}
-                    isLive={item.isLive}
-                    temporary={item.temporary}
-                    distanceMiles={getVendorDistance(item)}
-                    subscriptionTier={item.subscriptionTier}
-                    vendorMessage={item.vendorMessage}
-                  />
-                ))}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.horizontalListContent}
+                >
+                  {featuredProVans.map(renderFeaturedVendorCard)}
+                </ScrollView>
               </View>
             ) : null}
 
             <View style={styles.controlsCard}>
-              <Text style={styles.controlsTitle}>Browse vendors</Text>
+              <Text style={styles.controlsTitle}>Browse Vendors</Text>
+
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search van, vendor, cuisine, or food type"
+                placeholderTextColor="rgba(255,255,255,0.6)"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
 
               <View style={styles.filterRow}>
                 {(["ALL", "LIVE NOW", "TOP RATED", "FEATURED"] as BrowseFilter[]).map(
@@ -495,23 +588,6 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            <View style={styles.sectionBlock}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Browse by Food</Text>
-                <Text style={styles.sectionSubtitle}>
-                  Food types update as vendor categories grow
-                </Text>
-              </View>
-
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.foodCategoryRow}
-              >
-                {foodCategories.map(renderFoodCategoryCard)}
-              </ScrollView>
-            </View>
-
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>All Vendors Nearby</Text>
               <Text style={styles.sectionSubtitle}>
@@ -519,6 +595,16 @@ export default function HomeScreen() {
               </Text>
             </View>
           </>
+        }
+        ListEmptyComponent={
+          showEmptyState ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateTitle}>No vendors found</Text>
+              <Text style={styles.emptyStateText}>
+                Try a different search or change your food and browse filters.
+              </Text>
+            </View>
+          ) : null
         }
         renderItem={({ item }) => (
           <BurgerVanCard
@@ -559,9 +645,9 @@ const styles = StyleSheet.create({
     height: 280,
     borderRadius: 22,
     borderWidth: 2,
-    borderColor: "#FF7A00",
+    borderColor: theme.colors.border,
     overflow: "hidden",
-    backgroundColor: "#0B2A5B",
+    backgroundColor: theme.colors.background,
   },
 
   logo: {
@@ -569,30 +655,37 @@ const styles = StyleSheet.create({
     height: "100%",
   },
 
-  introSection: {
-    marginBottom: 18,
+  aboutSection: {
+    marginBottom: 24,
   },
 
-  kicker: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: "#FFC107",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
+  aboutGreeting: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: theme.colors.secondary,
     marginBottom: 6,
   },
 
-  introTitle: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    marginBottom: 6,
-  },
-
-  introText: {
+  aboutText: {
     fontSize: 15,
     lineHeight: 22,
-    color: "rgba(255,255,255,0.78)",
+    color: "rgba(255,255,255,0.86)",
+    marginBottom: 10,
+  },
+
+  aboutSignature: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.62)",
+    fontStyle: "italic",
+  },
+
+  aboutDivider: {
+    height: 2,
+    width: 120,
+    backgroundColor: theme.colors.primary,
+    borderRadius: 999,
+    marginTop: 14,
+    alignSelf: "center",
   },
 
   sectionBlock: {
@@ -641,7 +734,7 @@ const styles = StyleSheet.create({
   },
 
   liveCardBadge: {
-    backgroundColor: "#1DB954",
+    backgroundColor: theme.colors.success,
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "800",
@@ -652,13 +745,7 @@ const styles = StyleSheet.create({
   },
 
   liveCardFeatured: {
-    color: "#FF7A00",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-
-  liveCardGrowth: {
-    color: "#0B2A5B",
+    color: theme.colors.primary,
     fontSize: 10,
     fontWeight: "800",
   },
@@ -685,13 +772,125 @@ const styles = StyleSheet.create({
   liveCardRating: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#FF7A00",
+    color: theme.colors.primary,
   },
 
   liveCardDistance: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#0B2A5B",
+    color: theme.colors.background,
+  },
+
+  foodCategoryRow: {
+    paddingRight: 8,
+  },
+
+  foodCategoryChip: {
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginRight: 10,
+  },
+
+  foodCategoryChipActive: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+
+  foodCategoryChipText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  foodCategoryChipTextActive: {
+    color: "#FFFFFF",
+  },
+
+  featuredCard: {
+    width: 230,
+    minHeight: 150,
+    backgroundColor: "#14386E",
+    borderRadius: 22,
+    padding: 16,
+    marginRight: 12,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    overflow: "hidden",
+    justifyContent: "space-between",
+  },
+
+  featuredCardGlow: {
+    position: "absolute",
+    top: -18,
+    right: -18,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: "rgba(255,122,0,0.16)",
+  },
+
+  featuredCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  featuredCardBadge: {
+    backgroundColor: theme.colors.primary,
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+
+  featuredCardDistance: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  featuredCardTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginTop: 18,
+    marginBottom: 6,
+  },
+
+  featuredCardMeta: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.8)",
+    marginBottom: 16,
+  },
+
+  featuredCardFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  featuredCardRating: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.colors.secondary,
+  },
+
+  featuredCardDeal: {
+    backgroundColor: theme.colors.success,
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    overflow: "hidden",
   },
 
   controlsCard: {
@@ -701,7 +900,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 24,
     borderWidth: 2,
-    borderColor: "#FF7A00",
+    borderColor: theme.colors.border,
   },
 
   controlsTitle: {
@@ -709,6 +908,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#FFFFFF",
     marginBottom: 12,
+  },
+
+  searchInput: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 14,
+    color: "#FFFFFF",
   },
 
   filterRow: {
@@ -735,81 +945,28 @@ const styles = StyleSheet.create({
   },
 
   filterChipTextActive: {
-    color: "#0B2A5B",
+    color: theme.colors.background,
   },
 
-  foodCategoryRow: {
-    paddingRight: 8,
-  },
-
-  foodCategoryCard: {
-    width: 160,
-    minHeight: 92,
+  emptyState: {
     backgroundColor: "rgba(255,255,255,0.08)",
     borderRadius: 18,
-    padding: 14,
-    marginRight: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-    justifyContent: "space-between",
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    padding: 18,
+    marginTop: 6,
   },
 
-  foodCategoryCardActive: {
-    backgroundColor: "#FF7A00",
-    borderColor: "#FF7A00",
-  },
-
-  foodCategoryCardTitle: {
-    fontSize: 16,
+  emptyStateTitle: {
+    fontSize: 18,
     fontWeight: "800",
     color: "#FFFFFF",
-    marginBottom: 8,
-  },
-
-  foodCategoryCardTitleActive: {
-    color: "#FFFFFF",
-  },
-
-  foodCategoryCardText: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: "rgba(255,255,255,0.72)",
-  },
-
-  foodCategoryCardTextActive: {
-    color: "rgba(255,255,255,0.92)",
-  },
-
-  aboutSection: {
-    marginBottom: 26,
-  },
-
-  aboutGreeting: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#FFC107",
     marginBottom: 6,
   },
 
-  aboutText: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: "rgba(255,255,255,0.85)",
-    marginBottom: 10,
-  },
-
-  aboutSignature: {
-    fontSize: 13,
-    color: "rgba(255,255,255,0.6)",
-    fontStyle: "italic",
-  },
-
-  aboutDivider: {
-    height: 2,
-    width: 120,
-    backgroundColor: "#FF7A00",
-    borderRadius: 999,
-    marginTop: 14,
-    alignSelf: "center",
+  emptyStateText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "rgba(255,255,255,0.72)",
   },
 });

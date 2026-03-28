@@ -2,10 +2,14 @@ import { router } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { theme } from "../../constants/theme";
@@ -43,74 +47,94 @@ export default function UserSignupScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.heroBlock}>
-        <Text style={styles.kicker}>CREATE ACCOUNT</Text>
-        <Text style={styles.title}>Join BiteBeacon</Text>
-        <Text style={styles.subtitle}>
-          Create an account to save favourites and build your own BiteBeacon
-          experience.
-        </Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>User Signup</Text>
-
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter your email"
-          placeholderTextColor="#7A7A7A"
-          autoCapitalize="none"
-          keyboardType="email-address"
-          value={email}
-          onChangeText={setEmail}
-        />
-
-        <Text style={styles.label}>Password</Text>
-        <View style={styles.passwordWrap}>
-          <TextInput
-            style={styles.passwordInput}
-            placeholder="Create a password"
-            placeholderTextColor="#7A7A7A"
-            secureTextEntry={!showPassword}
-            value={password}
-            onChangeText={setPassword}
-          />
-
-          <Pressable onPress={() => setShowPassword(!showPassword)}>
-            <Text style={styles.showText}>
-              {showPassword ? "Hide" : "Show"}
+    <KeyboardAvoidingView
+      style={styles.keyboardContainer}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.container}>
+          <View style={styles.heroBlock}>
+            <Text style={styles.kicker}>CREATE ACCOUNT</Text>
+            <Text style={styles.title}>Join BiteBeacon</Text>
+            <Text style={styles.subtitle}>
+              Create an account to save favourites and build your own BiteBeacon
+              experience.
             </Text>
-          </Pressable>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>User Signup</Text>
+
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter your email"
+              placeholderTextColor="#7A7A7A"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoComplete="email"
+              textContentType="emailAddress"
+              importantForAutofill="yes"
+              value={email}
+              onChangeText={setEmail}
+            />
+
+            <Text style={styles.label}>Password</Text>
+            <View style={styles.passwordWrap}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Create a password"
+                placeholderTextColor="#7A7A7A"
+                secureTextEntry={!showPassword}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                importantForAutofill="yes"
+                value={password}
+                onChangeText={setPassword}
+              />
+
+              <Pressable onPress={() => setShowPassword(!showPassword)}>
+                <Text style={styles.showText}>
+                  {showPassword ? "Hide" : "Show"}
+                </Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.label}>Confirm Password</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Confirm password"
+              placeholderTextColor="#7A7A7A"
+              secureTextEntry={!showPassword}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              importantForAutofill="yes"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+            />
+
+            <Pressable style={styles.primaryButton} onPress={handleSignup}>
+              <Text style={styles.primaryButtonText}>Create Account</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.secondaryButton}
+              onPress={() => router.replace("/auth/user-login")}
+            >
+              <Text style={styles.secondaryButtonText}>Back to Login</Text>
+            </Pressable>
+          </View>
         </View>
-
-        <Text style={styles.label}>Confirm Password</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Confirm password"
-          placeholderTextColor="#7A7A7A"
-          secureTextEntry={!showPassword}
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-        />
-
-        <Pressable style={styles.primaryButton} onPress={handleSignup}>
-          <Text style={styles.primaryButtonText}>Create Account</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.secondaryButton}
-          onPress={() => router.replace("/auth/user-login")}
-        >
-          <Text style={styles.secondaryButtonText}>Back to Login</Text>
-        </Pressable>
-      </View>
-    </View>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardContainer: {
+    flex: 1,
+  },
+
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,

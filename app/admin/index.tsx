@@ -1,7 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -49,6 +48,7 @@ export default function AdminPanelScreen() {
   const liveVendors = vendors.filter((vendor) => vendor.isLive).length;
   const claimedVendors = vendors.filter((vendor) => !!vendor.owner_id).length;
   const spottedVans = vendors.filter((vendor) => vendor.temporary).length;
+  const suspendedVendors = vendors.filter((vendor) => vendor.isSuspended).length;
   const freeVendors = vendors.filter(
     (vendor) => (vendor.subscriptionTier ?? "free") === "free"
   ).length;
@@ -84,8 +84,8 @@ export default function AdminPanelScreen() {
       <Text style={styles.kicker}>ADMIN</Text>
       <Text style={styles.title}>Control Centre</Text>
       <Text style={styles.subtitle}>
-        A clean admin home for monitoring vendors, spotted vans, and future
-        moderation tools.
+        Monitor vendors, claims, moderation, and subscription control from one
+        place.
       </Text>
 
       <Text style={styles.sectionTitle}>Platform Summary</Text>
@@ -109,6 +109,11 @@ export default function AdminPanelScreen() {
         <View style={styles.statRow}>
           <Text style={styles.statLabel}>Spotted Vans</Text>
           <Text style={styles.statValue}>{spottedVans}</Text>
+        </View>
+
+        <View style={styles.statRow}>
+          <Text style={styles.statLabel}>Suspended Vendors</Text>
+          <Text style={styles.statValue}>{suspendedVendors}</Text>
         </View>
 
         <View style={styles.statRow}>
@@ -141,46 +146,21 @@ export default function AdminPanelScreen() {
 
       <Pressable
         style={styles.row}
-        onPress={() =>
-          Alert.alert(
-            "Review Spotted Vans",
-            "This can be built next after claims moderation is working."
-          )
-        }
-      >
-        <Text style={styles.rowTitle}>Review Spotted Vans</Text>
-        <Text style={styles.rowText}>
-          Future area for checking community-spotted submissions.
-        </Text>
-      </Pressable>
-
-      <Pressable
-        style={styles.row}
-        onPress={() =>
-          Alert.alert(
-            "Manage Vendors",
-            "Vendor management can be added next in a controlled way."
-          )
-        }
+        onPress={() => router.push("/admin/vendors")}
       >
         <Text style={styles.rowTitle}>Manage Vendors</Text>
         <Text style={styles.rowText}>
-          Future area for reviewing and managing vendor listings.
+          Suspend or unsuspend vendors and review moderation status.
         </Text>
       </Pressable>
 
       <Pressable
         style={styles.row}
-        onPress={() =>
-          Alert.alert(
-            "Manage Subscription Tiers",
-            "Tier management should always respect your Free, Growth, and Pro system."
-          )
-        }
+        onPress={() => router.push("/admin/subscriptions")}
       >
         <Text style={styles.rowTitle}>Manage Subscription Tiers</Text>
         <Text style={styles.rowText}>
-          Future area for moving vendors between Free, Growth, and Pro.
+          Move vendors between Free, Growth, and Pro.
         </Text>
       </Pressable>
 

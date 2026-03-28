@@ -1,517 +1,392 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
+import MapView, {
+  Marker,
+  type MapPressEvent,
+  type Region,
+} from "react-native-maps";
 import { getCurrentUser } from "../../services/authService";
-import { createVendor, getVendorByOwnerId } from "../../services/vendorService";
-import { type Van } from "../../types/van";
+import { createVendor } from "../../services/vendorService";
 
-const FOOD_CATEGORY_OPTIONS = [
-  "Burgers",
-  "Smash Burgers",
-  "BBQ",
-  "Vegan",
-  "Vegetarian",
-  "Desserts",
-  "Coffee",
-];
+const DEFAULT_REGION: Region = {
+  latitude: 50.266,
+  longitude: -5.0527,
+  latitudeDelta: 0.18,
+  longitudeDelta: 0.18,
+};
 
 export default function RegisterVendorScreen() {
-  const params = useLocalSearchParams();
+  const [name, setName] = useState("");
+  const [vendorName, setVendorName] = useState("");
+  const [cuisine, setCuisine] = useState("");
+  const [menu, setMenu] = useState("");
+  const [schedule, setSchedule] = useState("");
 
-  const [vanName, setVanName] = useState((params.vanName as string) ?? "");
-  const [vendorName, setVendorName] = useState(
-    (params.vendorName as string) ?? ""
-  );
-  const [cuisine, setCuisine] = useState((params.cuisine as string) ?? "");
-  const [menu, setMenu] = useState((params.menu as string) ?? "");
-  const [schedule, setSchedule] = useState((params.schedule as string) ?? "");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [foodCategories, setFoodCategories] = useState<string[]>(() => {
-    const raw = params.foodCategories as string | undefined;
+  const [region, setRegion] = useState<Region>(DEFAULT_REGION);
+  const [selectedLocation, setSelectedLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
 
-    if (!raw) return [];
+  const [isSaving, setIsSaving] = useState(false);
 
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return [];
-    }
-  });
-
-  const parsedLat = Number(params.lat);
-  const parsedLng = Number(params.lng);
-  const hasSelectedLocation =
-    !Number.isNaN(parsedLat) && !Number.isNaN(parsedLng);
-
-  function toggleFoodCategory(category: string) {
-    setFoodCategories((current) =>
-      current.includes(category)
-        ? current.filter((item) => item !== category)
-        : [...current, category]
-    );
+  function handleMapPress(event: MapPressEvent) {
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+    setSelectedLocation({ latitude, longitude });
   }
 
-  async function handleRegister() {
-    if (isSubmitting) return;
+  function clearLocation() {
+    setSelectedLocation(null);
+    setRegion(DEFAULT_REGION);
+  }
 
-    setIsSubmitting(true);
-
+  async function handleCreateVendor() {
     try {
-      if (!vanName.trim() || !vendorName.trim() || !cuisine.trim()) {
+      if (
+        !name.trim() ||
+        !vendorName.trim() ||
+        !cuisine.trim() ||
+        !menu.trim() ||
+        !schedule.trim() ||
+        !selectedLocation
+      ) {
         Alert.alert(
-          "Missing details",
-          "Please add the van name, vendor name, and cuisine."
+          "Missing fields",
+          "Please complete all fields and place your vendor on the map."
         );
         return;
       }
 
-      if (!hasSelectedLocation) {
-        Alert.alert("Location required", "Please choose a location on the map.");
+      const currentUser = await getCurrentUser();
+
+      if (!currentUser) {
+        Alert.alert("Login required", "Please log in to create a vendor listing.");
         return;
       }
 
-      const lat = parsedLat;
-      const lng = parsedLng;
+      setIsSaving(true);
 
-      const user = await getCurrentUser();
+      const id = `vendor-${Date.now()}`;
 
-      if (!user) {
-        Alert.alert("Login required", "Please log in as a vendor first.");
-        return;
-      }
-
-      const existingVendor = await getVendorByOwnerId(user.id);
-
-      if (existingVendor) {
-        Alert.alert(
-          "Vendor listing already exists",
-          "You already have a vendor listing. You will be taken to your dashboard."
-        );
-
-        router.replace({
-          pathname: "/vendor/dashboard",
-          params: { id: existingVendor.id },
-        });
-        return;
-      }
-
-      const claimId = params.claimId as string | undefined;
-
-      const newVan: Van = {
-        id: claimId ? `custom-${claimId}` : `custom-${Date.now()}`,
-        name: vanName.trim(),
+      await createVendor({
+        id,
+        name: name.trim(),
         vendorName: vendorName.trim(),
         cuisine: cuisine.trim(),
-        menu: menu.trim() || "Menu coming soon",
-        schedule: schedule.trim() || "Schedule coming soon",
-        lat,
-        lng,
-        rating: 0,
+        menu: menu.trim(),
+        schedule: schedule.trim(),
+        lat: selectedLocation.latitude,
+        lng: selectedLocation.longitude,
         temporary: false,
-        photo: (params.photo as string) || null,
+        listingSource: "admin_seeded",
         isLive: false,
-        owner_id: user.id,
-        views: 0,
-        directions: 0,
-        foodCategories,
-      };
-
-      try {
-        await createVendor({
-          id: newVan.id,
-          name: newVan.name,
-          vendorName: newVan.vendorName ?? "",
-          cuisine: newVan.cuisine,
-          menu: newVan.menu ?? "",
-          schedule: newVan.schedule ?? "",
-          lat: newVan.lat,
-          lng: newVan.lng,
-          photo: newVan.photo ?? null,
-          temporary: newVan.temporary ?? false,
-          isLive: newVan.isLive,
-          owner_id: newVan.owner_id ?? null,
-          views: newVan.views ?? 0,
-          directions: newVan.directions ?? 0,
-          rating: newVan.rating,
-          foodCategories: newVan.foodCategories ?? [],
-        });
-      } catch (error) {
-        Alert.alert(
-          "Save failed",
-          error instanceof Error ? error.message : "Unknown error"
-        );
-        return;
-      }
-
-      Alert.alert("Vendor registered", "Your van has been added to BiteBeacon.");
-
-      router.replace({
-        pathname: "/vendor/dashboard",
-        params: { id: newVan.id },
+        owner_id: currentUser.id,
+        subscriptionTier: "free",
+        foodCategories: [],
       });
+
+      Alert.alert("Success", "Vendor listing created successfully.", [
+        {
+          text: "OK",
+          onPress: () => router.replace("/vendor/dashboard"),
+        },
+      ]);
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : "Failed to create vendor"
+      );
     } finally {
-      setIsSubmitting(false);
+      setIsSaving(false);
     }
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>
-        {params.claimId ? "Claim This Burger Van" : "Create Your Vendor Listing"}
-      </Text>
+    <KeyboardAvoidingView
+      style={styles.keyboardContainer}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.title}>Create Vendor</Text>
+          <Text style={styles.subtitle}>
+            Build your listing, place it on the map, and get ready to go live.
+          </Text>
 
-      <Text style={styles.subtitle}>
-        {params.claimId
-          ? "Complete the details below to turn this spotted van into your official BiteBeacon listing."
-          : "Set up your food vendor profile so customers can discover you on BiteBeacon."}
-      </Text>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Basic Info</Text>
 
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Business Details</Text>
-        <Text style={styles.sectionText}>
-          Add the main information customers will use to identify your food van.
-        </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Van name"
+              placeholderTextColor="#7A7A7A"
+              value={name}
+              onChangeText={setName}
+            />
 
-        <Text style={styles.label}>Van name</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Van name"
-          value={vanName}
-          onChangeText={setVanName}
-        />
+            <TextInput
+              style={styles.input}
+              placeholder="Vendor name"
+              placeholderTextColor="#7A7A7A"
+              value={vendorName}
+              onChangeText={setVendorName}
+            />
 
-        <Text style={styles.label}>Vendor name</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Vendor name"
-          value={vendorName}
-          onChangeText={setVendorName}
-        />
+            <TextInput
+              style={styles.input}
+              placeholder="Cuisine"
+              placeholderTextColor="#7A7A7A"
+              value={cuisine}
+              onChangeText={setCuisine}
+            />
+          </View>
 
-        <Text style={styles.label}>Cuisine</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Cuisine"
-          value={cuisine}
-          onChangeText={setCuisine}
-        />
-      </View>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Listing Details</Text>
 
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Listing Details</Text>
-        <Text style={styles.sectionText}>
-          These details help customers decide whether to visit your van.
-        </Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Menu"
+              placeholderTextColor="#7A7A7A"
+              value={menu}
+              onChangeText={setMenu}
+              multiline
+              textAlignVertical="top"
+            />
 
-        <Text style={styles.label}>Menu</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Menu"
-          value={menu}
-          onChangeText={setMenu}
-          multiline
-        />
+            <TextInput
+              style={[styles.input, styles.textAreaSmall]}
+              placeholder="Schedule"
+              placeholderTextColor="#7A7A7A"
+              value={schedule}
+              onChangeText={setSchedule}
+              multiline
+              textAlignVertical="top"
+            />
+          </View>
 
-        <Text style={styles.label}>Weekly schedule</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Weekly schedule"
-          value={schedule}
-          onChangeText={setSchedule}
-          multiline
-        />
-
-        <Text style={styles.label}>Food categories</Text>
-        <View style={styles.checkboxGroup}>
-          {FOOD_CATEGORY_OPTIONS.map((category) => {
-            const isSelected = foodCategories.includes(category);
-
-            return (
-              <Pressable
-                key={category}
-                style={[
-                  styles.checkboxChip,
-                  isSelected && styles.checkboxChipSelected,
-                ]}
-                onPress={() => toggleFoodCategory(category)}
-              >
-                <Text
-                  style={[
-                    styles.checkboxChipText,
-                    isSelected && styles.checkboxChipTextSelected,
-                  ]}
-                >
-                  {isSelected ? "✓ " : ""}
-                  {category}
+          <View style={styles.card}>
+            <View style={styles.locationHeader}>
+              <View style={styles.locationTextWrap}>
+                <Text style={styles.sectionTitle}>Location</Text>
+                <Text style={styles.locationSubtext}>
+                  {selectedLocation
+                    ? "Tap elsewhere on the map to move the marker."
+                    : "Tap the map to choose your trading location."}
                 </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
+              </View>
 
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Location</Text>
-        <Text style={styles.sectionText}>
-          Choose where customers will find your van on the map.
-        </Text>
+              {selectedLocation ? (
+                <Pressable style={styles.clearChip} onPress={clearLocation}>
+                  <Text style={styles.clearChipText}>Clear</Text>
+                </Pressable>
+              ) : null}
+            </View>
 
-        <Pressable
-          style={styles.locationButton}
-          onPress={() =>
-            router.push({
-              pathname: "/vendor/pick-location",
-              params: {
-                vanName,
-                vendorName,
-                cuisine,
-                menu,
-                schedule,
-                claimId: (params.claimId as string) ?? "",
-                photo: (params.photo as string) ?? "",
-                foodCategories: JSON.stringify(foodCategories),
-                lat: (params.lat as string) ?? "",
-                lng: (params.lng as string) ?? "",
-              },
-            })
-          }
-        >
-          <Text style={styles.locationButtonText}>Choose Location on Map</Text>
-        </Pressable>
+            <View style={styles.mapWrap}>
+              <MapView
+                style={styles.map}
+                region={region}
+                onRegionChangeComplete={setRegion}
+                onPress={handleMapPress}
+              >
+                {selectedLocation ? (
+                  <Marker coordinate={selectedLocation} />
+                ) : null}
+              </MapView>
 
-        <View
-          style={[
-            styles.locationStatusCard,
-            hasSelectedLocation
-              ? styles.locationStatusSuccess
-              : styles.locationStatusPending,
-          ]}
-        >
-          <Text style={styles.locationStatusTitle}>
-            {hasSelectedLocation ? "Location selected" : "Location needed"}
-          </Text>
-          <Text style={styles.locationStatusText}>
-            {hasSelectedLocation
-              ? params.claimId
-                ? "The spotted van location is ready to use."
-                : "Your vendor listing location has been set."
-              : "Please choose your location before creating the listing."}
-          </Text>
-        </View>
-      </View>
+              <View style={styles.mapOverlay}>
+                <Text style={styles.mapOverlayText}>
+                  {selectedLocation ? "Location selected" : "Tap anywhere on the map"}
+                </Text>
+              </View>
+            </View>
+          </View>
 
-      <Pressable
-        style={styles.primaryButton}
-        onPress={handleRegister}
-        disabled={isSubmitting}
-      >
-        <Text style={styles.primaryButtonText}>
-          {isSubmitting
-            ? "Submitting..."
-            : params.claimId
-              ? "Claim Vendor Listing"
-              : "Create Vendor Listing"}
-        </Text>
-      </Pressable>
-
-      <Pressable style={styles.secondaryButton} onPress={() => router.back()}>
-        <Text style={styles.secondaryButtonText}>Cancel</Text>
-      </Pressable>
-    </ScrollView>
+          <Pressable
+            style={[styles.button, isSaving && styles.buttonDisabled]}
+            onPress={handleCreateVendor}
+            disabled={isSaving}
+          >
+            <Text style={styles.buttonText}>
+              {isSaving ? "Creating..." : "Create Vendor"}
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 }
 
+const NAVY = "#0B2A5B";
+const ORANGE = "#FF7A00";
+const LIGHT_BLUE = "#EAF2FF";
+const INPUT_BG = "#F8FBFF";
+const TEXT_DARK = "#16335C";
+const TEXT_MUTED = "#5D6F8F";
+const BORDER = "rgba(255,122,0,0.75)";
+
 const styles = StyleSheet.create({
+  keyboardContainer: {
+    flex: 1,
+  },
+
   container: {
     flex: 1,
-    backgroundColor: "#F7F4F2",
+    backgroundColor: NAVY,
   },
 
   content: {
-    padding: 24,
-    paddingTop: 40,
+    padding: 20,
     paddingBottom: 40,
   },
 
   title: {
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: "#FFFFFF",
     marginBottom: 8,
   },
 
   subtitle: {
     fontSize: 15,
-    color: "#5F6368",
-    marginBottom: 24,
+    color: "rgba(255,255,255,0.8)",
     lineHeight: 22,
+    marginBottom: 18,
   },
 
-  sectionCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 18,
-    borderWidth: 1,
-    borderColor: "#E5E5E5",
+  card: {
+    backgroundColor: LIGHT_BLUE,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: BORDER,
   },
 
   sectionTitle: {
-    fontSize: 19,
+    fontSize: 16,
     fontWeight: "800",
-    color: "#0B2A5B",
-    marginBottom: 6,
-  },
-
-  sectionText: {
-    fontSize: 14,
-    color: "#5F6368",
-    lineHeight: 21,
-    marginBottom: 16,
-  },
-
-  label: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#0B2A5B",
-    marginBottom: 8,
+    color: TEXT_DARK,
+    marginBottom: 12,
   },
 
   input: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    borderColor: "#FF7A00",
+    backgroundColor: INPUT_BG,
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 14,
+    paddingVertical: 13,
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: BORDER,
+    color: "#222222",
   },
 
   textArea: {
-    minHeight: 110,
-    textAlignVertical: "top",
+    minHeight: 96,
   },
 
-  locationButton: {
-    backgroundColor: "#0B2A5B",
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-    marginBottom: 14,
+  textAreaSmall: {
+    minHeight: 72,
   },
 
-  locationButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
+  locationHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 12,
   },
 
-  locationStatusCard: {
-    borderRadius: 14,
-    padding: 14,
+  locationTextWrap: {
+    flex: 1,
   },
 
-  locationStatusPending: {
-    backgroundColor: "#FFF3E0",
+  locationSubtext: {
+    fontSize: 13,
+    color: TEXT_MUTED,
+    lineHeight: 18,
+    marginTop: -4,
   },
 
-  locationStatusSuccess: {
-    backgroundColor: "#E8F5E9",
+  clearChip: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1.5,
+    borderColor: BORDER,
   },
 
-  locationStatusTitle: {
-    fontSize: 15,
+  clearChipText: {
+    color: TEXT_DARK,
+    fontSize: 12,
     fontWeight: "800",
-    color: "#0B2A5B",
-    marginBottom: 4,
   },
 
-  locationStatusText: {
-    fontSize: 14,
-    color: "#444",
-    lineHeight: 20,
+  mapWrap: {
+    overflow: "hidden",
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: BORDER,
   },
 
-  primaryButton: {
-    backgroundColor: "#0B2A5B",
-    paddingVertical: 14,
-    borderRadius: 16,
+  map: {
+    width: "100%",
+    height: 270,
+  },
+
+  mapOverlay: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 12,
+    backgroundColor: "rgba(11,42,91,0.88)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+
+  mapOverlayText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+
+  button: {
+    backgroundColor: ORANGE,
+    paddingVertical: 16,
+    borderRadius: 14,
     alignItems: "center",
     marginTop: 6,
-    marginBottom: 12,
   },
 
-  primaryButtonText: {
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+
+  buttonText: {
     color: "#FFFFFF",
+    fontWeight: "800",
     fontSize: 16,
-    fontWeight: "700",
-  },
-
-  claimExistingButton: {
-    backgroundColor: "#FFFFFF",
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: "#0B2A5B",
-  },
-
-  claimExistingButtonText: {
-    color: "#0B2A5B",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-
-  secondaryButton: {
-    backgroundColor: "#D9D9D9",
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-  },
-
-  secondaryButtonText: {
-    color: "#222222",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-
-  checkboxGroup: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 8,
-  },
-
-  checkboxChip: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#D9D9D9",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-
-  checkboxChipSelected: {
-    backgroundColor: "#0B2A5B",
-    borderColor: "#0B2A5B",
-  },
-
-  checkboxChipText: {
-    color: "#0B2A5B",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-
-  checkboxChipTextSelected: {
-    color: "#FFFFFF",
   },
 });

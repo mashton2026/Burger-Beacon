@@ -8,8 +8,13 @@ export type Van = {
   rating: number;
   cuisine: string;
   temporary?: boolean;
+  listingSource?: "admin_seeded" | "user_spotted";
+  expiresAt?: string | null;
+  expiredAt?: string | null;
   photo?: string | null;
   photos?: string[];
+  logoUrl?: string | null;
+  logoPath?: string | null;
   menuPdfUrl?: string | null;
   menuPdfName?: string | null;
   vendorName?: string;
@@ -22,4 +27,7 @@ export type Van = {
   owner_id?: string | null;
   subscriptionTier?: SubscriptionTier;
   foodCategories?: string[];
+  isSuspended?: boolean;
+  suspensionReason?: string | null;
+  suspendedAt?: string | null;
 };

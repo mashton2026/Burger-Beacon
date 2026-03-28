@@ -32,6 +32,8 @@ export default function RootLayout() {
         <Stack.Screen name="account/privacy" />
         <Stack.Screen name="admin/index" />
         <Stack.Screen name="admin/claims" />
+        <Stack.Screen name="admin/vendors" />
+        <Stack.Screen name="admin/subscriptions" />
         <Stack.Screen
           name="modal"
           options={{ presentation: "modal", title: "Modal" }}

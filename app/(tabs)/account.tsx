@@ -37,6 +37,12 @@ export default function AccountScreen() {
       const vendor = await getCurrentUserVendor();
 
       if (vendor) {
+        if (vendor.isSuspended) {
+          setIsVendor(false);
+          setVendorId(null);
+          return;
+        }
+
         setIsVendor(true);
         setVendorId(vendor.id);
         return;
@@ -71,6 +77,24 @@ export default function AccountScreen() {
       <Text style={styles.subtitle}>
         {email ? `Signed in as ${email}` : "Browsing as a guest"}
       </Text>
+
+      {email && vendorId && (
+        <Pressable
+          style={styles.vendorDashboardCard}
+          onPress={() =>
+            router.push({
+              pathname: "/vendor/dashboard",
+              params: { id: vendorId },
+            })
+          }
+        >
+          <Text style={styles.vendorDashboardEyebrow}>Vendor Dashboard</Text>
+          <Text style={styles.vendorDashboardTitle}>Manage your listing</Text>
+          <Text style={styles.vendorDashboardText}>
+            Manage your listing, analytics and content.
+          </Text>
+        </Pressable>
+      )}
 
       {!email && (
         <>
@@ -217,35 +241,51 @@ export default function AccountScreen() {
       {email && isAdmin && (
         <>
           <Section title="Admin" />
-
           <Row label="Control Centre" onPress={() => router.push("/admin")} />
 
-          <Section title="Security" />
+          {vendorId && (
+            <>
+              <Section title="Vendor Tools" />
+              <Row
+                label="Dashboard"
+                onPress={() =>
+                  router.push({
+                    pathname: "/vendor/dashboard",
+                    params: { id: vendorId },
+                  })
+                }
+              />
+              <Row
+                label="View Listing"
+                onPress={() =>
+                  router.push({
+                    pathname: "/vendor/[id]",
+                    params: { id: vendorId },
+                  })
+                }
+              />
+            </>
+          )}
 
+          <Section title="Security" />
           <Row
             label="Account Settings"
             onPress={() => router.push("/account/security")}
           />
-
           <Section title="Help & Support" />
-
           <Row
             label="Contact BiteBeacon Support"
             onPress={() => router.push("/account/help")}
           />
-
           <Section title="Legal" />
-
           <Row
             label="Terms & Conditions"
             onPress={() => router.push("/account/terms")}
           />
-
           <Row
             label="Privacy Policy"
             onPress={() => router.push("/account/privacy")}
           />
-
           <LogoutButton onPress={handleLogout} />
         </>
       )}
@@ -297,6 +337,39 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "rgba(255,255,255,0.7)",
     marginBottom: 20,
+  },
+
+  vendorDashboardCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: theme.colors.secondary,
+  },
+
+  vendorDashboardEyebrow: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.colors.secondary,
+    letterSpacing: 1,
+    marginBottom: 6,
+    textTransform: "uppercase",
+  },
+
+  vendorDashboardTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0B2A5B",
+    marginBottom: 4,
+  },
+
+  vendorDashboardText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#355070",
+    fontWeight: "600",
   },
 
   section: {

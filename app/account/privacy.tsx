@@ -22,7 +22,8 @@ export default function PrivacyScreen() {
                 <Text style={styles.sectionTitle}>Account Information</Text>
                 <Text style={styles.bodyText}>
                     BiteBeacon uses account information such as email address and login
-                    credentials to let users and vendors securely access the app.
+                    credentials to let users and vendors securely access the app and
+                    manage their accounts.
                 </Text>
             </View>
 
@@ -39,17 +40,27 @@ export default function PrivacyScreen() {
                 <Text style={styles.sectionTitle}>Usage Data</Text>
                 <Text style={styles.bodyText}>
                     BiteBeacon may store activity such as listing views, directions,
-                    favourites, and vendor interactions in order to improve the app and
-                    support platform features.
+                    favourites, ratings, and vendor interactions in order to improve the
+                    app, support platform features, and better understand how BiteBeacon
+                    is being used.
                 </Text>
             </View>
 
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Community Spotted Vans</Text>
                 <Text style={styles.bodyText}>
-                    Community-spotted listings may include van names, cuisine details,
-                    map coordinates, and optional photos submitted by users before a
-                    vendor officially claims the listing.
+                    Community-spotted listings may include van names, cuisine details, map
+                    coordinates, and optional photos submitted by users before a vendor
+                    officially claims the listing.
+                </Text>
+            </View>
+
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Subscription & Payment Information</Text>
+                <Text style={styles.bodyText}>
+                    If vendor subscriptions or paid features are used, payment processing
+                    may be handled by third-party providers such as Stripe. BiteBeacon
+                    does not store full card details directly inside the app.
                 </Text>
             </View>
 
@@ -63,11 +74,45 @@ export default function PrivacyScreen() {
             </View>
 
             <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Data Handling</Text>
+                <Text style={styles.sectionTitle}>How Data Is Used</Text>
                 <Text style={styles.bodyText}>
-                    BiteBeacon should only use the data needed to run the platform,
-                    improve discovery, support vendors, maintain account security, and
-                    develop the product over time.
+                    BiteBeacon uses data to run the platform, improve discovery, support
+                    vendors, maintain account security, process subscriptions, respond to
+                    support requests, and develop the product over time.
+                </Text>
+            </View>
+
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Data Sharing</Text>
+                <Text style={styles.bodyText}>
+                    BiteBeacon may share limited data with trusted service providers where
+                    necessary to operate the platform, such as hosting, authentication,
+                    payment processing, storage, analytics, and mapping services.
+                </Text>
+            </View>
+
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Data Retention</Text>
+                <Text style={styles.bodyText}>
+                    BiteBeacon keeps data for as long as it is reasonably needed to run
+                    the service, maintain listings, support users and vendors, meet legal
+                    obligations, resolve disputes, and protect the platform.
+                </Text>
+            </View>
+
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Security</Text>
+                <Text style={styles.bodyText}>
+                    BiteBeacon takes reasonable steps to protect account and platform data,
+                    but no online service can guarantee absolute security.
+                </Text>
+            </View>
+
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Contact & Privacy Requests</Text>
+                <Text style={styles.bodyText}>
+                    If you have questions about privacy, account data, or platform data
+                    handling, please contact BiteBeacon support.
                 </Text>
             </View>
 
@@ -131,6 +176,7 @@ const styles = StyleSheet.create({
         fontSize: 15,
         lineHeight: 22,
         color: theme.colors.muted,
+        marginBottom: 6,
     },
 
     backButton: {

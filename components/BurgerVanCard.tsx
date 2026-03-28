@@ -25,41 +25,76 @@ export default function BurgerVanCard({
   subscriptionTier,
   vendorMessage,
 }: Props) {
+  const statusText = temporary
+    ? "SPOTTED"
+    : isLive
+      ? "LIVE"
+      : subscriptionTier === "pro"
+        ? "FEATURED"
+        : "LISTED";
+
   return (
     <Pressable
       onPress={() => router.push(`/vendor/${id}`)}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
     >
-      {subscriptionTier === "pro" ? (
-        <View style={styles.featuredBadge}>
-          <Text style={styles.featuredBadgeText}>FEATURED</Text>
-        </View>
-      ) : subscriptionTier === "growth" ? (
-        <View style={styles.growthBadge}>
-          <Text style={styles.growthBadgeText}>GROWTH</Text>
-        </View>
-      ) : null}
+      <View style={styles.glowOrb} />
+      <View style={styles.topAccentLine} />
 
-      <View style={styles.accent} />
+      <View style={styles.headerRow}>
+        <View style={styles.leftBadges}>
+          {subscriptionTier === "pro" ? (
+            <View style={[styles.badge, styles.featuredBadge]}>
+              <Text style={styles.badgeText}>FEATURED</Text>
+            </View>
+          ) : subscriptionTier === "growth" ? (
+            <View style={[styles.badge, styles.growthBadge]}>
+              <Text style={styles.badgeText}>GROWTH</Text>
+            </View>
+          ) : null}
 
-      {!!vendorMessage?.trim() ? (
-        <View style={styles.dealBadge}>
-          <Text style={styles.dealBadgeText}>DEAL</Text>
+          {!!vendorMessage?.trim() ? (
+            <View style={[styles.badge, styles.dealBadge]}>
+              <Text style={styles.badgeText}>DEAL</Text>
+            </View>
+          ) : null}
         </View>
-      ) : null}
+
+        <View
+          style={[
+            styles.statusPill,
+            temporary
+              ? styles.statusSpotted
+              : isLive
+                ? styles.statusLive
+                : styles.statusListed,
+          ]}
+        >
+          <Text style={styles.statusPillText}>{statusText}</Text>
+        </View>
+      </View>
 
       <View style={styles.content}>
-        <Text style={styles.name}>{name}</Text>
-        <Text style={styles.meta}>{cuisine}</Text>
+        <Text style={styles.name} numberOfLines={1}>
+          {name}
+        </Text>
+
+        <Text style={styles.meta} numberOfLines={1}>
+          {cuisine}
+        </Text>
 
         <View style={styles.footerRow}>
-          <View style={styles.ratingRow}>
+          <View style={styles.infoPill}>
             <Text style={styles.star}>★</Text>
-            <Text style={styles.rating}>{rating.toFixed(1)}</Text>
+            <Text style={styles.infoPillText}>{rating.toFixed(1)}</Text>
           </View>
 
           {distanceMiles !== undefined && distanceMiles !== null ? (
-            <Text style={styles.distance}>{distanceMiles.toFixed(1)} mi</Text>
+            <View style={styles.infoPill}>
+              <Text style={styles.infoPillText}>
+                {distanceMiles.toFixed(1)} mi
+              </Text>
+            </View>
           ) : null}
         </View>
       </View>
@@ -69,128 +104,150 @@ export default function BurgerVanCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: theme.colors.card,
-    borderRadius: 16,
-    marginBottom: 10,
-    flexDirection: "row",
+    backgroundColor: "#F9FBFF",
+    borderRadius: 20,
+    marginBottom: 12,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
     position: "relative",
-    borderWidth: 2,
-    borderColor: theme.colors.border,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,122,0,0.35)",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
 
   cardPressed: {
-    opacity: 0.96,
+    opacity: 0.97,
     transform: [{ scale: 0.995 }],
   },
 
-  featuredBadge: {
+  glowOrb: {
     position: "absolute",
-    top: 10,
-    right: 10,
-    backgroundColor: theme.colors.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    zIndex: 10,
+    top: -24,
+    right: -18,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: "rgba(255,122,0,0.10)",
   },
 
-  featuredBadgeText: {
-    color: theme.colors.textOnDark,
-    fontSize: 10,
-    fontWeight: "800",
-  },
-
-  dealBadge: {
-    position: "absolute",
-    top: 38,
-    right: 10,
-    backgroundColor: theme.colors.success,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    zIndex: 10,
-  },
-
-  dealBadgeText: {
-    color: theme.colors.textOnDark,
-    fontSize: 10,
-    fontWeight: "800",
-  },
-
-  growthBadge: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    backgroundColor: theme.colors.background,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    zIndex: 10,
-  },
-
-  growthBadgeText: {
-    color: theme.colors.textOnDark,
-    fontSize: 10,
-    fontWeight: "800",
-  },
-
-  accent: {
-    width: 5,
+  topAccentLine: {
+    height: 5,
     backgroundColor: theme.colors.primary,
   },
 
-  content: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+  headerRow: {
+    paddingTop: 12,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+
+  leftBadges: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
     flex: 1,
   },
 
-  name: {
-    fontSize: 16,
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+
+  featuredBadge: {
+    backgroundColor: theme.colors.primary,
+  },
+
+  growthBadge: {
+    backgroundColor: theme.colors.background,
+  },
+
+  dealBadge: {
+    backgroundColor: theme.colors.success,
+  },
+
+  badgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
     fontWeight: "800",
-    color: theme.colors.text,
+  },
+
+  statusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+
+  statusLive: {
+    backgroundColor: "rgba(29,185,84,0.14)",
+  },
+
+  statusListed: {
+    backgroundColor: "rgba(11,42,91,0.10)",
+  },
+
+  statusSpotted: {
+    backgroundColor: "rgba(255,122,0,0.14)",
+  },
+
+  statusPillText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: theme.colors.background,
+  },
+
+  content: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+  },
+
+  name: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: theme.colors.background,
     marginBottom: 6,
-    paddingRight: 90,
   },
 
   meta: {
     fontSize: 13,
     color: theme.colors.muted,
-    marginBottom: 8,
+    marginBottom: 12,
   },
 
   footerRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
   },
 
-  ratingRow: {
+  infoPill: {
     flexDirection: "row",
     alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "rgba(11,42,91,0.08)",
   },
 
   star: {
-    fontSize: 16,
+    fontSize: 14,
     color: theme.colors.secondary,
     marginRight: 6,
   },
 
-  rating: {
-    fontSize: 14,
+  infoPillText: {
+    fontSize: 13,
     fontWeight: "700",
-    color: theme.colors.primary,
-  },
-
-  distance: {
-    fontSize: 12,
-    fontWeight: "600",
     color: theme.colors.background,
   },
 });

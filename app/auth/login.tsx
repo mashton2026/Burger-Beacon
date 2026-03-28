@@ -2,10 +2,14 @@ import { router } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { theme } from "../../constants/theme";
@@ -41,6 +45,14 @@ export default function VendorLoginScreen() {
       const vendor = await getVendorByOwnerId(user.id);
 
       if (vendor) {
+        if (vendor.isSuspended) {
+          Alert.alert(
+            "Account suspended",
+            "This vendor account has been suspended. Please contact BiteBeacon support."
+          );
+          return;
+        }
+
         router.replace({
           pathname: "/vendor/dashboard",
           params: { id: vendor.id },
@@ -65,74 +77,100 @@ export default function VendorLoginScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.heroBlock}>
-        <Text style={styles.kicker}>VENDOR PORTAL</Text>
-        <Text style={styles.title}>Welcome back</Text>
-        <Text style={styles.subtitle}>
-          Log in to manage your BiteBeacon listing, keep your van live, and stay
-          visible to hungry customers.
-        </Text>
-      </View>
-
-      <View style={styles.formCard}>
-        <Text style={styles.sectionTitle}>Vendor Login</Text>
-
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter your email"
-          placeholderTextColor="#7A7A7A"
-          autoCapitalize="none"
-          keyboardType="email-address"
-          value={email}
-          onChangeText={setEmail}
-        />
-
-        <Text style={styles.label}>Password</Text>
-        <View style={styles.passwordWrap}>
-          <TextInput
-            style={styles.passwordInput}
-            placeholder="Enter your password"
-            placeholderTextColor="#7A7A7A"
-            secureTextEntry={!showPassword}
-            value={password}
-            onChangeText={setPassword}
-          />
-
-          <Pressable
-            style={styles.showPasswordButton}
-            onPress={() => setShowPassword((current) => !current)}
-          >
-            <Text style={styles.showPasswordButtonText}>
-              {showPassword ? "Hide" : "Show"}
+    <KeyboardAvoidingView
+      style={styles.keyboardContainer}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.container}>
+          <View style={styles.heroBlock}>
+            <Text style={styles.kicker}>VENDOR PORTAL</Text>
+            <Text style={styles.title}>Welcome back</Text>
+            <Text style={styles.subtitle}>
+              Log in to manage your BiteBeacon listing, keep your van live, and stay
+              visible to hungry customers.
             </Text>
-          </Pressable>
+          </View>
+
+          <View style={styles.formCard}>
+            <Text style={styles.sectionTitle}>Vendor Login</Text>
+
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter your email"
+              placeholderTextColor="#7A7A7A"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoComplete="email"
+              textContentType="emailAddress"
+              importantForAutofill="yes"
+              value={email}
+              onChangeText={setEmail}
+            />
+
+            <Text style={styles.label}>Password</Text>
+            <View style={styles.passwordWrap}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Enter your password"
+                placeholderTextColor="#7A7A7A"
+                secureTextEntry={!showPassword}
+                autoComplete="password"
+                textContentType="password"
+                importantForAutofill="yes"
+                value={password}
+                onChangeText={setPassword}
+              />
+
+              <Pressable
+                style={styles.showPasswordButton}
+                onPress={() => setShowPassword((current) => !current)}
+              >
+                <Text style={styles.showPasswordButtonText}>
+                  {showPassword ? "Hide" : "Show"}
+                </Text>
+              </Pressable>
+            </View>
+
+            <Pressable style={styles.primaryButton} onPress={handleLogin}>
+              <Text style={styles.primaryButtonText}>Log In</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => router.push("/auth/forgot-password")}
+              style={{ marginTop: 10, alignItems: "center" }}
+            >
+              <Text style={{ color: "#FF7A00", fontWeight: "700" }}>
+                Forgot password?
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.secondaryButton}
+              onPress={() => router.push("/auth/vendor-signup")}
+            >
+              <Text style={styles.secondaryButtonText}>Create Vendor Account</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.backButton}
+              onPress={() => router.replace("/welcome")}
+            >
+              <Text style={styles.backButtonText}>Back</Text>
+            </Pressable>
+          </View>
         </View>
-
-        <Pressable style={styles.primaryButton} onPress={handleLogin}>
-          <Text style={styles.primaryButtonText}>Log In</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.secondaryButton}
-          onPress={() => router.push("/auth/vendor-signup")}
-        >
-          <Text style={styles.secondaryButtonText}>Create Vendor Account</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.backButton}
-          onPress={() => router.replace("/welcome")}
-        >
-          <Text style={styles.backButtonText}>Back</Text>
-        </Pressable>
-      </View>
-    </View>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardContainer: {
+    flex: 1,
+  },
+
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,

@@ -72,6 +72,10 @@ export default function VendorSignupScreen() {
           placeholder="Enter your email"
           placeholderTextColor="#7A7A7A"
           autoCapitalize="none"
+          keyboardType="email-address"
+          autoComplete="email"
+          textContentType="emailAddress"
+          importantForAutofill="yes"
           value={email}
           onChangeText={setEmail}
         />
@@ -83,6 +87,9 @@ export default function VendorSignupScreen() {
             placeholder="Create a password"
             placeholderTextColor="#7A7A7A"
             secureTextEntry={!showPassword}
+            autoComplete="new-password"
+            textContentType="newPassword"
+            importantForAutofill="yes"
             value={password}
             onChangeText={setPassword}
           />
@@ -100,6 +107,9 @@ export default function VendorSignupScreen() {
           placeholder="Confirm password"
           placeholderTextColor="#7A7A7A"
           secureTextEntry={!showPassword}
+          autoComplete="new-password"
+          textContentType="newPassword"
+          importantForAutofill="yes"
           value={confirmPassword}
           onChangeText={setConfirmPassword}
         />
