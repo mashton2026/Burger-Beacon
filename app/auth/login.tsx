@@ -84,7 +84,7 @@ export default function VendorLoginScreen() {
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.container}>
           <View style={styles.heroBlock}>
-            <Text style={styles.kicker}>VENDOR PORTAL</Text>
+            <Text style={styles.kicker}>VENDOR / ADMIN PORTAL</Text>
             <Text style={styles.title}>Welcome back</Text>
             <Text style={styles.subtitle}>
               Log in to manage your BiteBeacon listing, keep your van live, and stay
@@ -93,7 +93,7 @@ export default function VendorLoginScreen() {
           </View>
 
           <View style={styles.formCard}>
-            <Text style={styles.sectionTitle}>Vendor Login</Text>
+            <Text style={styles.sectionTitle}>Vendor / Admin Login</Text>
 
             <Text style={styles.label}>Email</Text>
             <TextInput

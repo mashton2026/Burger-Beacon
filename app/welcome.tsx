@@ -7,7 +7,6 @@ export default function WelcomeScreen() {
     <View style={styles.container}>
       <View style={styles.bgOrbTop} />
       <View style={styles.bgOrbBottom} />
-
       <View style={styles.lineOne} />
       <View style={styles.lineTwo} />
       <View style={styles.lineThree} />
@@ -39,13 +38,13 @@ export default function WelcomeScreen() {
           />
         </View>
 
-        <Text style={styles.title}>Putting street food on the map</Text>
+        <Text style={styles.title}>Putting great food on the map</Text>
 
         <View style={styles.divider} />
 
         <Text style={styles.tagline}>
-          Discover local food vans, follow what’s live, and support the vendors
-          behind it.
+          Discover the best street food, hidden gems, and unique eats in every
+          town — from food vans to must-try local favourites.
         </Text>
 
         <View style={styles.buttonWrap}>
@@ -60,7 +59,9 @@ export default function WelcomeScreen() {
             style={styles.secondaryButton}
             onPress={() => router.push("/auth/login")}
           >
-            <Text style={styles.secondaryButtonText}>Vendor Portal</Text>
+            <Text style={styles.secondaryButtonText}>
+              Vendor / Admin Portal
+            </Text>
           </Pressable>
         </View>
       </View>

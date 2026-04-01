@@ -10,7 +10,11 @@ import {
   Text,
   View,
 } from "react-native";
-import { getSubscriptionFeatures } from "../../lib/subscriptionFeatures";
+import {
+  getSubscriptionFeatures,
+  isFreeTier,
+  isProTier,
+} from "../../lib/subscriptionFeatures";
 import {
   getCurrentUser,
   getCurrentUserVendor,
@@ -43,6 +47,8 @@ type AssetAwareVan = Van & {
   logoUrl?: string | null;
   logoPath?: string | null;
 };
+
+const vendorCache = new Map<string, AssetAwareVan>();
 
 const NAVY = "#061A38";
 const NAVY_DARK = "#0A2347";
@@ -90,15 +96,16 @@ export default function VendorScreen() {
         setLoading(true);
 
         try {
-          await loadVan();
+          const userId = await loadCurrentUser();
 
-          await Promise.all([
-            loadCurrentUser(),
-            loadUserRating(),
-            loadRatingCount(),
-            checkIfFavourite(),
-            loadCurrentUserVendorState(),
-          ]);
+          // Load main content FIRST (fastest perceived load)
+          await loadVan(userId);
+
+          // Load everything else in background (no waiting)
+          loadUserRating(userId);
+          loadRatingCount();
+          checkIfFavourite(userId);
+          loadCurrentUserVendorState(userId);
         } finally {
           setLoading(false);
         }
@@ -113,14 +120,20 @@ export default function VendorScreen() {
 
     if (!user) {
       setCurrentUserId(null);
-      return;
+      return null;
     }
 
     setCurrentUserId(user.id);
+    return user.id;
   }
 
-  async function loadCurrentUserVendorState() {
+  async function loadCurrentUserVendorState(userId?: string | null) {
     try {
+      if (!userId) {
+        setIsCurrentUserVendorAccount(false);
+        return;
+      }
+
       const vendor = await getCurrentUserVendor();
       setIsCurrentUserVendorAccount(!!vendor);
     } catch {
@@ -128,9 +141,15 @@ export default function VendorScreen() {
     }
   }
 
-  async function loadVan() {
+  async function loadVan(userId?: string | null) {
+    // 🚀 Instant cache load
+    if (vendorCache.has(id)) {
+      setVan(vendorCache.get(id)!);
+    }
+
     try {
       const vendor = (await getVendorById(id)) as AssetAwareVan | null;
+
 
       if (!vendor) {
         setVan(null);
@@ -138,15 +157,16 @@ export default function VendorScreen() {
       }
 
       setVan(vendor);
+      vendorCache.set(id, vendor);
 
       void (async () => {
         try {
-          const userId = await getCurrentUserId();
+          const uid = userId;
 
-          if (userId) {
+          if (uid) {
             const canCount = await canCountVendorInteraction(
               vendor.id,
-              userId,
+              uid,
               "view",
               1440
             );
@@ -164,7 +184,6 @@ export default function VendorScreen() {
           );
         }
       })();
-
     } catch (error) {
       console.log(
         "Error loading vendor:",
@@ -174,10 +193,8 @@ export default function VendorScreen() {
     }
   }
 
-  async function loadUserRating() {
+  async function loadUserRating(userId?: string | null) {
     try {
-      const userId = await getCurrentUserId();
-
       if (!userId) {
         setUserRating(null);
         return;
@@ -199,10 +216,8 @@ export default function VendorScreen() {
     }
   }
 
-  async function checkIfFavourite() {
+  async function checkIfFavourite(userId?: string | null) {
     try {
-      const userId = await getCurrentUserId();
-
       if (!userId) {
         setIsFavourite(false);
         return;
@@ -414,8 +429,7 @@ export default function VendorScreen() {
           : "LISTED"
         : "LISTED";
 
-  const primaryVisual =
-    van.logoUrl ?? galleryPhotos[0] ?? null;
+  const primaryVisual = van.logoUrl ?? galleryPhotos[0] ?? null;
 
   const showLogoSection = !!van.logoUrl;
 
@@ -455,7 +469,7 @@ export default function VendorScreen() {
               <Text style={styles.statusBadgeText}>{statusText}</Text>
             </View>
 
-            {van.subscriptionTier === "pro" && (
+            {isProTier(van.subscriptionTier) && (
               <View style={styles.planBadge}>
                 <Text style={styles.planBadgeText}>PRO</Text>
               </View>
@@ -467,9 +481,18 @@ export default function VendorScreen() {
               </View>
             ) : null}
 
-            {van.subscriptionTier === "pro" ? (
+            {isProTier(van.subscriptionTier) ? (
               <View style={styles.featuredBadge}>
-                <Text style={styles.featuredBadgeText}>PRO</Text>
+                <Text style={styles.featuredBadgeText}>FEATURED</Text>
+              </View>
+            ) : null}
+
+            {isProTier(van.subscriptionTier) &&
+              (van.views ?? 0) >= 25 &&
+              (van.directions ?? 0) >= 5 &&
+              (van.rating ?? 0) >= 4.2 ? (
+              <View style={styles.trendingBadge}>
+                <Text style={styles.trendingBadgeText}>TRENDING</Text>
               </View>
             ) : null}
           </View>
@@ -504,7 +527,7 @@ export default function VendorScreen() {
         </View>
       ) : null}
 
-      {isOwner && van.subscriptionTier === "free" ? (
+      {isOwner && isFreeTier(van.subscriptionTier) ? (
         <View style={styles.noticeCardOrange}>
           <Text style={styles.noticeTitleOrange}>Unlock More Features</Text>
           <Text style={styles.noticeTextOrange}>
@@ -699,6 +722,18 @@ export default function VendorScreen() {
               <Pressable style={styles.orangeButton} onPress={openClaimScreen}>
                 <Text style={styles.orangeButtonText}>Claim This Van</Text>
               </Pressable>
+
+              <Pressable
+                style={styles.reportButton}
+                onPress={() =>
+                  router.push({
+                    pathname: "/vendor/report",
+                    params: { id: van.id },
+                  })
+                }
+              >
+                <Text style={styles.reportButtonText}>Report Listing</Text>
+              </Pressable>
             </>
           ) : (
             <>
@@ -721,6 +756,18 @@ export default function VendorScreen() {
                       ? "★ Saved to Favourites"
                       : "☆ Save to Favourites"}
                 </Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.reportButton}
+                onPress={() =>
+                  router.push({
+                    pathname: "/vendor/report",
+                    params: { id: van.id },
+                  })
+                }
+              >
+                <Text style={styles.reportButtonText}>Report Listing</Text>
               </Pressable>
             </>
           )}
@@ -875,6 +922,21 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1.2,
     borderColor: ORANGE_SOFT,
+  },
+
+  trendingBadge: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1.2,
+    borderColor: ORANGE,
+  },
+
+  trendingBadgeText: {
+    color: ORANGE,
+    fontSize: 10,
+    fontWeight: "800",
   },
 
   featuredBadgeText: {
@@ -1227,6 +1289,22 @@ const styles = StyleSheet.create({
 
   orangeButtonText: {
     color: WHITE,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  reportButton: {
+    backgroundColor: "transparent",
+    paddingVertical: 15,
+    borderRadius: 16,
+    alignItems: "center",
+    marginTop: 2,
+    borderWidth: 1.5,
+    borderColor: "#E53935",
+  },
+
+  reportButtonText: {
+    color: "#FFB3B3",
     fontSize: 15,
     fontWeight: "800",
   },

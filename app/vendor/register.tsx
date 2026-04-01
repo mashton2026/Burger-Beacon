@@ -34,13 +34,11 @@ export default function RegisterVendorScreen() {
   const [cuisine, setCuisine] = useState("");
   const [menu, setMenu] = useState("");
   const [schedule, setSchedule] = useState("");
-
   const [region, setRegion] = useState<Region>(DEFAULT_REGION);
   const [selectedLocation, setSelectedLocation] = useState<{
     latitude: number;
     longitude: number;
   } | null>(null);
-
   const [isSaving, setIsSaving] = useState(false);
 
   function handleMapPress(event: MapPressEvent) {
@@ -117,13 +115,14 @@ export default function RegisterVendorScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.keyboardContainer}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <ScrollView
           style={styles.container}
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.title}>Create Vendor</Text>
@@ -256,7 +255,8 @@ const styles = StyleSheet.create({
 
   content: {
     padding: 20,
-    paddingBottom: 40,
+    paddingBottom: 140,
+    flexGrow: 1,
   },
 
   title: {

@@ -2,7 +2,10 @@ import { router } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -54,78 +57,90 @@ export default function VendorSignupScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.heroBlock}>
-        <Text style={styles.kicker}>CREATE ACCOUNT</Text>
-        <Text style={styles.title}>Start your vendor journey</Text>
-        <Text style={styles.subtitle}>
-          Create your vendor account and get your food van live on BiteBeacon.
-        </Text>
-      </View>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        showsVerticalScrollIndicator={false}
+      >
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Vendor Signup</Text>
+        <View style={styles.heroBlock}>
+          <Text style={styles.kicker}>CREATE ACCOUNT</Text>
+          <Text style={styles.title}>Start your vendor journey</Text>
+          <Text style={styles.subtitle}>
+            Create your vendor account and get your food van live on BiteBeacon.
+          </Text>
+        </View>
 
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter your email"
-          placeholderTextColor="#7A7A7A"
-          autoCapitalize="none"
-          keyboardType="email-address"
-          autoComplete="email"
-          textContentType="emailAddress"
-          importantForAutofill="yes"
-          value={email}
-          onChangeText={setEmail}
-        />
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Vendor Signup</Text>
 
-        <Text style={styles.label}>Password</Text>
-        <View style={styles.passwordWrap}>
+          <Text style={styles.label}>Email</Text>
           <TextInput
-            style={styles.passwordInput}
-            placeholder="Create a password"
+            style={styles.input}
+            placeholder="Enter your email"
+            placeholderTextColor="#7A7A7A"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            autoComplete="email"
+            textContentType="emailAddress"
+            importantForAutofill="yes"
+            value={email}
+            onChangeText={setEmail}
+          />
+
+          <Text style={styles.label}>Password</Text>
+          <View style={styles.passwordWrap}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Create a password"
+              placeholderTextColor="#7A7A7A"
+              secureTextEntry={!showPassword}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              importantForAutofill="yes"
+              value={password}
+              onChangeText={setPassword}
+            />
+            <Pressable onPress={() => setShowPassword(!showPassword)}>
+              <Text style={styles.showText}>
+                {showPassword ? "Hide" : "Show"}
+              </Text>
+            </Pressable>
+          </View>
+
+          <Text style={styles.label}>Confirm Password</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Confirm password"
             placeholderTextColor="#7A7A7A"
             secureTextEntry={!showPassword}
             autoComplete="new-password"
             textContentType="newPassword"
             importantForAutofill="yes"
-            value={password}
-            onChangeText={setPassword}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
           />
 
-          <Pressable onPress={() => setShowPassword(!showPassword)}>
-            <Text style={styles.showText}>
-              {showPassword ? "Hide" : "Show"}
+          <Pressable style={styles.primaryButton} onPress={handleSignup}>
+            <Text style={styles.primaryButtonText}>
+              Create Vendor Account
             </Text>
           </Pressable>
+
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={() => router.replace("/auth/login")}
+          >
+            <Text style={styles.secondaryButtonText}>Back to Login</Text>
+          </Pressable>
         </View>
-
-        <Text style={styles.label}>Confirm Password</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Confirm password"
-          placeholderTextColor="#7A7A7A"
-          secureTextEntry={!showPassword}
-          autoComplete="new-password"
-          textContentType="newPassword"
-          importantForAutofill="yes"
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-        />
-
-        <Pressable style={styles.primaryButton} onPress={handleSignup}>
-          <Text style={styles.primaryButtonText}>Create Vendor Account</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.secondaryButton}
-          onPress={() => router.replace("/auth/login")}
-        >
-          <Text style={styles.secondaryButtonText}>Back to Login</Text>
-        </Pressable>
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -133,8 +148,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,
-    padding: 24,
+  },
+
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: "center",
+    padding: 24,
+    paddingBottom: 160,
   },
 
   heroBlock: {

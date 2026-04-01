@@ -1,7 +1,7 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -63,6 +63,32 @@ type HeatmapPoint = {
   weight: number;
 };
 
+type DashboardSectionKey =
+  | "insights"
+  | "branding"
+  | "growth"
+  | "guide"
+  | "health"
+  | "assets"
+  | "edit"
+  | "account";
+
+const NAVY = "#0B2A5B";
+const NAVY_DEEP = "#081F45";
+const WHITE = "#FFFFFF";
+const ORANGE = "#FF7A00";
+const ORANGE_SOFT = "#FFB357";
+const GREEN = "#1DB954";
+const OFFLINE = "#888888";
+const CARD_BG = "#FFFFFF";
+const MUTED_TEXT = "#5F6368";
+const SOFT_BG = "#F5F7FA";
+const SOFT_BORDER = "rgba(255,122,0,0.35)";
+const THIN_BLACK = "rgba(0,0,0,0.14)";
+const SOFT_ORANGE_BG = "#FFF4E8";
+const SOFT_ORANGE_BORDER = "#FFD1A6";
+const DARK_TEXT = "#0B2A5B";
+
 const FOOD_CATEGORY_OPTIONS = [
   "Burgers",
   "Smash Burgers",
@@ -103,170 +129,102 @@ function getPeakHourLabel(hour: number) {
   return `${normalized}${suffix}`;
 }
 
-function formatShortDayLabel(dateString: string) {
+function formatInsightDay(dateString: string) {
   const date = new Date(`${dateString}T00:00:00`);
   return date.toLocaleDateString("en-GB", {
+    weekday: "short",
     day: "numeric",
     month: "short",
   });
 }
 
-function buildLast30DaysViews(points: InsightPoint[]) {
-  const totalsByDay = new Map<string, number>();
+async function getReadableLocation(lat: number, lng: number) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`
+    );
 
-  points.forEach((point) => {
-    if (!point.day) return;
-    totalsByDay.set(point.day, point.total ?? 0);
-  });
+    if (!res.ok) {
+      return "Unknown area";
+    }
 
-  const days: { day: string; shortLabel: string; total: number }[] = [];
+    const data = await res.json();
+    const address = data.address;
 
-  for (let index = 29; index >= 0; index -= 1) {
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
-    date.setDate(date.getDate() - index);
-
-    const isoDay = date.toISOString().slice(0, 10);
-
-    days.push({
-      day: isoDay,
-      shortLabel: formatShortDayLabel(isoDay),
-      total: totalsByDay.get(isoDay) ?? 0,
-    });
+    return (
+      address?.town ||
+      address?.city ||
+      address?.village ||
+      address?.county ||
+      "Unknown area"
+    );
+  } catch {
+    return "Unknown area";
   }
-
-  return days;
 }
-
-function build24HourBuckets(points: InsightPoint[]) {
-  const totalsByHour = new Map<number, number>();
-
-  points.forEach((point) => {
-    const safeHour = Number(point.hour);
-    if (!Number.isInteger(safeHour) || safeHour < 0 || safeHour > 23) return;
-    totalsByHour.set(safeHour, point.total ?? 0);
-  });
-
-  return Array.from({ length: 24 }, (_, hour) => ({
-    hour,
-    label: getPeakHourLabel(hour),
-    shortLabel: hour % 6 === 0 ? getPeakHourLabel(hour) : "",
-    total: totalsByHour.get(hour) ?? 0,
-  }));
-}
-
-function TrendsMiniChart({
-  title,
-  subtitle,
-  points,
-}: {
-  title: string;
-  subtitle: string;
-  points: InsightPoint[];
-}) {
-  const chartData = buildLast30DaysViews(points);
-  const maxTotal = Math.max(...chartData.map((item) => item.total), 1);
-  const hasData = chartData.some((item) => item.total > 0);
-
-  return (
-    <View style={styles.insightCard}>
-      <Text style={styles.insightCardTitle}>{title}</Text>
-      <Text style={styles.insightCardSubtitle}>{subtitle}</Text>
-
-      {!hasData ? (
-        <View style={styles.emptyInlineCard}>
-          <Text style={styles.emptyInlineTitle}>No trend data yet</Text>
-          <Text style={styles.emptyInlineText}>
-            Daily activity will appear here once customers start engaging with your listing.
-          </Text>
-        </View>
-      ) : (
-        <>
-          <View style={styles.trendChart}>
-            {chartData.map((item) => {
-              const height = Math.max(
-                (item.total / maxTotal) * 120,
-                item.total > 0 ? 8 : 4
-              );
-
-              return (
-                <View key={item.day} style={styles.trendBarWrap}>
-                  <View style={styles.trendBarTrack}>
-                    <View style={[styles.trendBarFill, { height }]} />
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-
-          <View style={styles.trendAxisRow}>
-            <Text style={styles.trendAxisLabel}>
-              {chartData[0]?.shortLabel}
-            </Text>
-            <Text style={styles.trendAxisLabel}>
-              {chartData[14]?.shortLabel}
-            </Text>
-            <Text style={styles.trendAxisLabel}>
-              {chartData[29]?.shortLabel}
-            </Text>
-          </View>
-        </>
-      )}
-    </View>
+function getTopDay(points: InsightPoint[]) {
+  const valid = points.filter(
+    (point): point is InsightPoint & { day: string } => !!point.day
   );
+
+  if (valid.length === 0) return null;
+
+  return [...valid].sort((a, b) => (b.total ?? 0) - (a.total ?? 0))[0];
 }
 
-function PeakHoursChart({
+function getLowestDay(points: InsightPoint[]) {
+  const valid = points.filter(
+    (point): point is InsightPoint & { day: string } => !!point.day
+  );
+
+  if (valid.length === 0) return null;
+
+  return [...valid].sort((a, b) => (a.total ?? 0) - (b.total ?? 0))[0];
+}
+
+function getTopHours(points: InsightPoint[]) {
+  return [...points]
+    .filter(
+      (point) =>
+        Number.isInteger(point.hour) &&
+        Number(point.hour) >= 0 &&
+        Number(point.hour) <= 23
+    )
+    .sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
+    .slice(0, 3);
+}
+
+function getTopHeatmapLocations(points: HeatmapPoint[]) {
+  return [...points].sort((a, b) => b.weight - a.weight).slice(0, 3);
+}
+
+function DashboardAccordionSection({
   title,
   subtitle,
-  points,
+  isOpen,
+  onToggle,
+  children,
 }: {
   title: string;
   subtitle: string;
-  points: InsightPoint[];
+  isOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
 }) {
-  const chartData = build24HourBuckets(points);
-  const maxTotal = Math.max(...chartData.map((item) => item.total), 1);
-  const hasData = chartData.some((item) => item.total > 0);
-
   return (
-    <View style={styles.insightCard}>
-      <Text style={styles.insightCardTitle}>{title}</Text>
-      <Text style={styles.insightCardSubtitle}>{subtitle}</Text>
-
-      {!hasData ? (
-        <View style={styles.emptyInlineCard}>
-          <Text style={styles.emptyInlineTitle}>No peak hour data yet</Text>
-          <Text style={styles.emptyInlineText}>
-            Hourly engagement will appear here once more customer activity is recorded.
-          </Text>
+    <View style={styles.sectionWrap}>
+      <Pressable style={styles.sectionHeader} onPress={onToggle}>
+        <View style={styles.sectionHeaderTextWrap}>
+          <Text style={styles.sectionTitle}>{title}</Text>
+          <Text style={styles.sectionSubtitle}>{subtitle}</Text>
         </View>
-      ) : (
-        <View style={styles.hourChart}>
-          {chartData.map((item) => {
-            const height = Math.max(
-              (item.total / maxTotal) * 120,
-              item.total > 0 ? 8 : 4
-            );
 
-            return (
-              <View key={item.hour} style={styles.hourBarWrap}>
-                <View style={styles.hourBarTrack}>
-                  <View style={[styles.hourBarFill, { height }]} />
-                </View>
-
-                {item.shortLabel ? (
-                  <Text style={styles.hourAxisLabel}>
-                    {item.shortLabel}
-                  </Text>
-                ) : (
-                  <View style={styles.hourAxisSpacer} />
-                )}
-              </View>
-            );
-          })}
+        <View style={styles.sectionTogglePill}>
+          <Text style={styles.sectionToggleText}>{isOpen ? "Hide" : "Show"}</Text>
         </View>
-      )}
+      </Pressable>
+
+      {isOpen ? <View style={styles.sectionBody}>{children}</View> : null}
     </View>
   );
 }
@@ -310,8 +268,8 @@ function TierExplanationCard({
 
 export default function VendorDashboardScreen() {
   const params = useLocalSearchParams();
-  const id = params.id as string;
   const scrollRef = useRef<ScrollView | null>(null);
+  const statusUpdateInputRef = useRef<TextInput | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [accessChecked, setAccessChecked] = useState(false);
@@ -338,24 +296,73 @@ export default function VendorDashboardScreen() {
   );
   const [lat, setLat] = useState<number>(0);
   const [lng, setLng] = useState<number>(0);
-  const [editSectionY, setEditSectionY] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [insights, setInsights] = useState<AdvancedInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [heatmapPoints, setHeatmapPoints] = useState<HeatmapPoint[]>([]);
   const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [locationNames, setLocationNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function resolveLocations() {
+      const names = await Promise.all(
+        heatmapPoints.slice(0, 3).map((point) =>
+          getReadableLocation(point.lat, point.lng)
+        )
+      );
+
+      setLocationNames(names);
+    }
+
+    if (heatmapPoints.length > 0) {
+      resolveLocations();
+    } else {
+      setLocationNames([]);
+    }
+  }, [heatmapPoints]);
+
   const [expandedTier, setExpandedTier] = useState<"free" | "growth" | "pro">(
     "growth"
   );
 
+  const [openSections, setOpenSections] = useState<
+    Record<DashboardSectionKey, boolean>
+  >({
+    insights: false,
+    branding: false,
+    growth: false,
+    guide: false,
+    health: false,
+    assets: false,
+    edit: true,
+    account: false,
+  });
+
+  function toggleSection(section: DashboardSectionKey) {
+    setOpenSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
+  function openSection(section: DashboardSectionKey) {
+    setOpenSections((current) => ({
+      ...current,
+      [section]: true,
+    }));
+  }
+
   useFocusEffect(
     useCallback(() => {
       async function checkAccess() {
-        const vendor = await getCurrentUserVendor();
+        try {
+          const vendor = await getCurrentUserVendor();
 
-        if (!vendor) {
+          if (!vendor) {
+            router.replace("/vendor/register");
+          }
+        } catch {
           router.replace("/vendor/register");
-          return;
         }
       }
 
@@ -366,7 +373,7 @@ export default function VendorDashboardScreen() {
   useFocusEffect(
     useCallback(() => {
       loadDashboard();
-    }, [id])
+    }, [])
   );
 
   useEffect(() => {
@@ -493,14 +500,19 @@ export default function VendorDashboardScreen() {
 
       setCurrentUserId(user.id);
 
-      const myClaims = await getMyVendorClaims(user.id);
-      setClaims(myClaims);
-
       const vendor = await getVendorByOwnerId(user.id);
 
       if (!vendor) {
         setVan(null);
         setAccessChecked(true);
+        void (async () => {
+          try {
+            const myClaims = await getMyVendorClaims(user.id);
+            setClaims(myClaims);
+          } catch {
+            setClaims([]);
+          }
+        })();
         return;
       }
 
@@ -525,12 +537,6 @@ export default function VendorDashboardScreen() {
             ? [vendor.photo]
             : [];
 
-      let nextMenuPdfUri: string | null = null;
-
-      if (assetVendor.menuPdfUrl) {
-        nextMenuPdfUri = await getVendorMenuPdfSignedUrl(assetVendor.menuPdfUrl);
-      }
-
       setVan(vendor);
       setName(vendor.name);
       setVendorName(vendor.vendorName ?? "");
@@ -545,17 +551,29 @@ export default function VendorDashboardScreen() {
       setLogoUri(assetVendor.logoUrl ?? null);
       setLogoPath(assetVendor.logoPath ?? null);
       setMenuPdfName(assetVendor.menuPdfName ?? null);
-      setMenuPdfUri(nextMenuPdfUri);
+      void (async () => {
+        if (!assetVendor.menuPdfUrl) {
+          setMenuPdfUri(null);
+          return;
+        }
+
+        try {
+          const signedUrl = await getVendorMenuPdfSignedUrl(assetVendor.menuPdfUrl);
+          setMenuPdfUri(signedUrl);
+        } catch {
+          setMenuPdfUri(null);
+        }
+      })();
+
       setMenuPdfStoragePath(assetVendor.menuPdfUrl ?? null);
       setLat(vendor.lat);
       setLng(vendor.lng);
 
-      await Promise.all([
-        loadAdvancedInsights(vendor.id, vendor.subscriptionTier ?? "free"),
-        loadHeatmapPoints(vendor.id, vendor.subscriptionTier ?? "free"),
-      ]);
-
       setAccessChecked(true);
+
+      void loadAdvancedInsights(vendor.id, vendor.subscriptionTier ?? "free");
+      void loadHeatmapPoints(vendor.id, vendor.subscriptionTier ?? "free");
+
     } catch {
       setVan(null);
       setAccessChecked(true);
@@ -652,9 +670,7 @@ export default function VendorDashboardScreen() {
   }
 
   function removePhoto(indexToRemove: number) {
-    setPhotos((current) =>
-      current.filter((_, index) => index !== indexToRemove)
-    );
+    setPhotos((current) => current.filter((_, index) => index !== indexToRemove));
   }
 
   function removeLogo() {
@@ -721,10 +737,15 @@ export default function VendorDashboardScreen() {
   }
 
   function jumpToEditSection() {
-    scrollRef.current?.scrollTo({
-      y: Math.max(editSectionY - 20, 0),
-      animated: true,
-    });
+    openSection("edit");
+
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+
+      setTimeout(() => {
+        statusUpdateInputRef.current?.focus();
+      }, 350);
+    }, 200);
   }
 
   function updateLocation() {
@@ -761,7 +782,6 @@ export default function VendorDashboardScreen() {
 
     try {
       await supabase.from("vendors").update({ is_live: newStatus }).eq("id", van.id);
-
       setIsLive(newStatus);
     } catch (error) {
       Alert.alert(
@@ -812,7 +832,6 @@ export default function VendorDashboardScreen() {
       if (features.images) {
         const existingRemotePhotos = photos.filter((uri) => !isLocalFileUri(uri));
         const localPhotos = photos.filter((uri) => isLocalFileUri(uri));
-
         const uniqueLocalPhotos = Array.from(new Set(localPhotos));
 
         const uploadedPhotoUrls =
@@ -870,9 +889,7 @@ export default function VendorDashboardScreen() {
           menu: menu.trim() || "Menu coming soon",
           schedule: schedule.trim() || "Schedule coming soon",
           vendor_message: features.reviews ? vendorMessage.trim() : null,
-          photo: features.images
-            ? nextPhotos[0] ?? van.photo ?? null
-            : null,
+          photo: features.images ? nextPhotos[0] ?? van.photo ?? null : null,
           photos: features.images ? nextPhotos : [],
           logo_url: features.images ? nextLogoUri : null,
           logo_path: features.images ? nextLogoPath : null,
@@ -920,14 +937,8 @@ export default function VendorDashboardScreen() {
       setVan(updatedVan);
 
       await Promise.all([
-        loadAdvancedInsights(
-          updatedVan.id,
-          updatedVan.subscriptionTier ?? "free"
-        ),
-        loadHeatmapPoints(
-          updatedVan.id,
-          updatedVan.subscriptionTier ?? "free"
-        ),
+        loadAdvancedInsights(updatedVan.id, updatedVan.subscriptionTier ?? "free"),
+        loadHeatmapPoints(updatedVan.id, updatedVan.subscriptionTier ?? "free"),
       ]);
 
       Alert.alert("Saved", "Your dashboard changes were saved.");
@@ -948,10 +959,7 @@ export default function VendorDashboardScreen() {
       "Delete listing",
       "Are you sure you want to delete this vendor listing?",
       [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
+        { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
@@ -959,10 +967,7 @@ export default function VendorDashboardScreen() {
             const user = await getCurrentUser();
 
             if (!user || user.id !== van.owner_id) {
-              Alert.alert(
-                "Access denied",
-                "You can only delete your own listing."
-              );
+              Alert.alert("Access denied", "You can only delete your own listing.");
               return;
             }
 
@@ -984,6 +989,53 @@ export default function VendorDashboardScreen() {
     );
   }
 
+  async function manageSubscriptionFromDashboard() {
+    try {
+      const vendor = await getCurrentUserVendor();
+
+      if (!vendor?.stripe_customer_id) {
+        Alert.alert(
+          "Unavailable",
+          "No active subscription found for this vendor."
+        );
+        return;
+      }
+
+      const response = await supabase.functions.invoke(
+        "create-portal-session",
+        {
+          body: {
+            vendorId: vendor.id,
+          },
+        }
+      );
+
+      if (response.error) {
+        const message =
+          typeof response.error === "object" &&
+            response.error !== null &&
+            "message" in response.error &&
+            typeof response.error.message === "string"
+            ? response.error.message
+            : "Edge Function returned a non-2xx status code";
+
+        Alert.alert("Error", message);
+        return;
+      }
+
+      if (response.data?.url) {
+        await Linking.openURL(response.data.url);
+      } else {
+        Alert.alert("Error", "No portal URL returned.");
+      }
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : "Something went wrong"
+      );
+    }
+  }
+
   async function handleLogout() {
     try {
       await signOutCurrentUser();
@@ -995,6 +1047,289 @@ export default function VendorDashboardScreen() {
       );
     }
   }
+
+  const upgradeSignal = useMemo(() => {
+    if (!van) return null;
+
+    const views = van.views ?? 0;
+    const directions = van.directions ?? 0;
+    const conversion = views > 0 ? (directions / views) * 100 : 0;
+
+    if (van.subscriptionTier === "free") {
+      if (views >= 20 && directions < 5) {
+        return {
+          title: "You are getting noticed, but your listing looks limited",
+          body: "Customers are finding you, but Free plan limitations can make it harder to convert interest into real visits. Growth unlocks LIVE status, branding, menu PDF uploads, and stronger listing trust.",
+          cta: "Upgrade to Growth",
+        };
+      }
+
+      return {
+        title: "You are visible, but not yet competitive enough",
+        body: "Free gets you listed, but Growth gives you the tools to look more active, more complete, and more trustworthy to customers deciding where to go.",
+        cta: "Upgrade to Growth",
+      };
+    }
+
+    if (van.subscriptionTier === "growth") {
+      if (views >= 30 && conversion < 12) {
+        return {
+          title: "You have visibility, but you need sharper performance insight",
+          body: "Growth helps you look professional, but Pro helps you understand exactly when and where customers engage most so you can make smarter trading decisions.",
+          cta: "Upgrade to Pro",
+        };
+      }
+
+      return {
+        title: "You have the tools — Pro adds decision advantage",
+        body: "Pro gives you premium discovery support plus interpreted analytics, timing signals, and stronger competitive visibility across BiteBeacon.",
+        cta: "Upgrade to Pro",
+      };
+    }
+
+    return null;
+  }, [van]);
+
+  const performanceSignal = useMemo(() => {
+    if (!van) return null;
+
+    const views = van.views ?? 0;
+    const directions = van.directions ?? 0;
+    const numericConversion = views > 0 ? (directions / views) * 100 : 0;
+
+    if (van.subscriptionTier === "pro" && insights) {
+      if ((insights.views ?? 0) < 10) {
+        return {
+          title: "Early-stage data",
+          body: "You are still building enough activity for stronger patterns. More views, directions, and LIVE sessions will make your analytics more specific.",
+        };
+      }
+
+      if ((insights.views ?? 0) >= 30 && (insights.conversion_rate ?? 0) < 10) {
+        return {
+          title: "Seen, but not converting enough",
+          body: "Customers are finding your listing, but too few are taking the next step. Stronger branding, clearer menu detail, and more LIVE consistency should help.",
+        };
+      }
+
+      if ((insights.conversion_rate ?? 0) >= 20) {
+        return {
+          title: "Strong intent building",
+          body: "Your recent listing activity shows healthy customer intent. Keep your menu, timings, and LIVE windows consistent to maintain momentum.",
+        };
+      }
+
+      return {
+        title: "Activity is building steadily",
+        body: "Your recent analytics show a usable level of visibility and intent. Tightening your timing and listing strength should improve results.",
+      };
+    }
+
+    if (views < 15) {
+      return {
+        title: "Visibility still needs to build",
+        body: "Your listing needs more exposure before stronger patterns can form. Going LIVE consistently and keeping your public profile complete will help.",
+      };
+    }
+
+    if (numericConversion >= 20) {
+      return {
+        title: "Good momentum",
+        body: "Your listing is converting interest well. Keep your schedule, menu, and LIVE status updated to maintain that performance.",
+      };
+    }
+
+    return {
+      title: "Keep sharpening the listing",
+      body: "Your vendor tools are in place. Strong visuals, a clear menu, and consistent LIVE status will help turn more discovery into real visits.",
+    };
+  }, [van, insights]);
+
+  const monetisationInsight = useMemo(() => {
+    if (!van) return null;
+
+    const views = van.views ?? 0;
+    const directions = van.directions ?? 0;
+    const conversion = views > 0 ? (directions / views) * 100 : 0;
+
+    if (van.subscriptionTier === "free") {
+      if (views >= 20 && directions < 5) {
+        return {
+          title: "You are getting noticed, but your listing still feels limited",
+          body: "Customers are finding you, but Free plan limitations can make it harder to turn interest into real visits. Growth helps your listing look more active, complete, and trustworthy.",
+        };
+      }
+
+      return {
+        title: "You are missing live visibility",
+        body: "Customers are more likely to visit vendors that appear LIVE at the right time. Growth lets you control that visibility and stay more relevant when people are searching.",
+      };
+
+    }
+
+
+    return null;
+  }, [van]);
+
+  const actionRecommendation = useMemo(() => {
+    if (!van) return null;
+
+    const hour = new Date().getHours();
+    const views = van.views ?? 0;
+    const directions = van.directions ?? 0;
+    const hasPhotos = photos.length > 0;
+
+    // 🔥 Peak-time LIVE suggestion (5pm–9pm)
+    if (
+      van.subscriptionTier !== "free" &&
+      !isLive &&
+      hour >= 17 &&
+      hour <= 21
+    ) {
+      return {
+        title: "Go LIVE now",
+        body: "You are entering peak food hours. Turning LIVE on now increases your chances of being discovered.",
+        action: () => handleLiveToggle(true),
+        cta: "Go Live",
+      };
+    }
+
+    // 📸 No photos = weak trust
+    if (van.subscriptionTier !== "free" && !hasPhotos) {
+      return {
+        title: "Add photos to your listing",
+        body: "Listings with photos build more trust and get more engagement from customers.",
+        action: pickPhotos,
+        cta: "Add Photos",
+      };
+    }
+
+    // 🧾 Missing basics
+    if (!menu.trim() || !schedule.trim()) {
+      return {
+        title: "Complete your listing",
+        body: "Adding your menu and schedule helps customers decide and improves trust.",
+        action: jumpToEditSection,
+        cta: "Complete Listing",
+      };
+    }
+
+    // 💬 No recent activity
+    if (van.subscriptionTier !== "free" && !vendorMessage.trim()) {
+      return {
+        title: "Post a quick update",
+        body: "Keeping your listing active with updates helps you stay relevant to customers.",
+        action: jumpToEditSection,
+        cta: "Add Update",
+      };
+    }
+
+    // 📉 Low engagement fallback
+    if (views < 10 && directions === 0) {
+      return {
+        title: "Increase your visibility",
+        body: "Going LIVE consistently and improving your listing will help you get discovered.",
+        action: jumpToEditSection,
+        cta: "Improve Listing",
+      };
+    }
+
+    return null;
+  }, [
+    van,
+    isLive,
+    photos,
+    menu,
+    schedule,
+    vendorMessage,
+  ]);
+
+  const proInsight = useMemo(() => {
+    if (!van || van.subscriptionTier !== "pro") return null;
+
+    const recentViews = insights?.views ?? 0;
+    const recentDirections = insights?.directions ?? 0;
+    const recentConversion = Number(insights?.conversion_rate ?? 0);
+    const topDay = getTopDay(insights?.daily_views ?? []);
+    const quietDay = getLowestDay(insights?.daily_views ?? []);
+    const topHours = getTopHours(insights?.peak_hours ?? []);
+    const topLocations = getTopHeatmapLocations(heatmapPoints);
+
+    const bestHoursText =
+      topHours.length > 0
+        ? topHours.map((item) => getPeakHourLabel(Number(item.hour ?? 0))).join(", ")
+        : null;
+
+    const locationText =
+      topLocations.length > 0 && locationNames.length > 0
+        ? topLocations
+          .slice(0, locationNames.length)
+          .map(
+            (point, index) =>
+              `${index + 1}. ${locationNames[index]} (activity score ${point.weight})`
+          )
+          .join("\n")
+        : null;
+
+    let summary =
+      "We need more recent activity before we can give you highly specific performance guidance.";
+
+    if (recentViews >= 30 && recentConversion < 10) {
+      summary =
+        "After assessing your last 30 days of views, directions, timing, and location engagement, your listing is getting noticed but not converting strongly enough yet.";
+    } else if (recentViews >= 20 && recentConversion >= 10 && recentConversion < 20) {
+      summary =
+        "After assessing your last 30 days of views, directions, timing, and location engagement, your listing is building solid interest but still has room to convert more customers.";
+    } else if (recentViews >= 20 && recentConversion >= 20) {
+      summary =
+        "After assessing your last 30 days of views, directions, timing, and location engagement, your listing is showing strong intent from customers discovering you.";
+    } else if (recentViews > 0) {
+      summary =
+        "After assessing your recent listing activity, your analytics are starting to form early performance patterns, but you still need more data for deeper precision.";
+    }
+
+    let recommendation =
+      "Keep building data by going LIVE consistently, keeping your listing updated, and making sure your public profile looks complete.";
+
+    if (recentViews >= 30 && recentConversion < 10) {
+      recommendation =
+        "Your next move should be improving conversion: strengthen your logo and visuals, tighten menu clarity, and go LIVE before your busiest hours.";
+    } else if (recentViews >= 20 && recentConversion >= 20) {
+      recommendation =
+        "Your next move should be timing discipline: go LIVE before your busiest windows and keep your strongest listing assets up to date.";
+    } else if (bestHoursText) {
+      recommendation =
+        "Your next move should be to concentrate service around your strongest engagement windows and keep your LIVE status aligned with them.";
+    }
+
+    return {
+      recentViews,
+      recentDirections,
+      recentConversion,
+      summary,
+      recommendation,
+      bestHoursText,
+      locationText,
+      topDay,
+      quietDay,
+      hasSpecificTiming: !!bestHoursText,
+      hasSpecificLocation: !!locationText,
+      hasEnoughData: recentViews >= 10 || recentDirections >= 3,
+    };
+  }, [heatmapPoints, insights, van]);
+
+  useEffect(() => {
+    if (!van) return;
+
+    const currentFeatures = getSubscriptionFeatures(van.subscriptionTier);
+    const missingMenu = !menu.trim();
+    const missingSchedule = !schedule.trim();
+    const missingPhotos = photos.length === 0 && currentFeatures.images;
+
+    if (missingMenu || missingSchedule || missingPhotos) {
+      openSection("edit");
+    }
+  }, [van, menu, schedule, photos.length]);
 
   if (loading) {
     return (
@@ -1075,7 +1410,10 @@ export default function VendorDashboardScreen() {
   }
 
   const features = getSubscriptionFeatures(van.subscriptionTier);
+
   const listingReady = !!menu.trim() && !!schedule.trim();
+  const needsListingAttention =
+    !menu.trim() || !schedule.trim() || (features.images && photos.length === 0);
 
   const currentPlanLabel =
     van.subscriptionTier === "growth"
@@ -1098,25 +1436,6 @@ export default function VendorDashboardScreen() {
         ? styles.planBadgeTextGrowth
         : styles.planBadgeTextFree;
 
-  const statusLabel = features.liveStatus
-    ? isLive
-      ? "Live"
-      : "Offline"
-    : "Listed";
-
-  const upgradeTitle =
-    van.subscriptionTier === "growth"
-      ? "Move up to Pro"
-      : "Upgrade your vendor tools";
-
-  const upgradeText =
-    van.subscriptionTier === "growth"
-      ? "Unlock advanced analytics, stronger branding, and a more premium presence."
-      : "Unlock increased visibility, logo branding, listing photos, and stronger customer trust.";
-
-  const upgradeButtonText =
-    van.subscriptionTier === "growth" ? "Upgrade to Pro" : "Upgrade to Growth";
-
   const filteredFoodCategoryOptions = FOOD_CATEGORY_OPTIONS.filter((category) =>
     category.toLowerCase().includes(foodCategorySearch.trim().toLowerCase())
   );
@@ -1127,13 +1446,14 @@ export default function VendorDashboardScreen() {
       : "0.0";
 
   const hasLogo = !!logoUri;
+  const heroVisualUri = hasLogo ? logoUri : photos[0] ?? null;
 
   const proVisualSupport =
     van.subscriptionTier === "pro"
-      ? "Your Pro plan gives your dashboard a premium look and access to deeper performance insights."
+      ? "Your Pro plan gives you premium visibility and deeper commercial insight."
       : van.subscriptionTier === "growth"
-        ? "Growth helps you look more established with branding and stronger visibility tools."
-        : "Free gets you listed. Growth and Pro are built to help you stand out more.";
+        ? "Growth helps your business look more established and convert more customers."
+        : "Free gets you listed. Growth and Pro are built to help you stand out faster.";
 
   return (
     <ScrollView
@@ -1147,8 +1467,7 @@ export default function VendorDashboardScreen() {
           <View style={styles.headerTextWrap}>
             <Text style={styles.headerTitle}>Vendor Dashboard</Text>
             <Text style={styles.headerSubtitle}>
-              Manage your listing, track performance, and sharpen your customer
-              presence.
+              Run your BiteBeacon presence like a business.
             </Text>
           </View>
 
@@ -1170,68 +1489,42 @@ export default function VendorDashboardScreen() {
         </View>
       </View>
 
-      {claims.length > 0 && (
-        <>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your Claim</Text>
-            <Text style={styles.sectionSubtitle}>
-              Track the status of your ownership request.
-            </Text>
-          </View>
-
-          <View style={styles.cardBox}>
-            {claims.slice(0, 1).map((claim) => (
-              <View key={claim.id}>
-                <Text style={styles.claimStatus}>
-                  Status: {claim.status.toUpperCase()}
-                </Text>
-
-                {claim.admin_note ? (
-                  <>
-                    <Text style={styles.claimNoteLabel}>Admin Note</Text>
-                    <Text style={styles.claimNote}>{claim.admin_note}</Text>
-                  </>
-                ) : (
-                  <Text style={styles.claimPending}>
-                    Waiting for admin review...
-                  </Text>
-                )}
-              </View>
-            ))}
-          </View>
-        </>
-      )}
+      {claims.length > 0 ? (
+        <View style={styles.claimBanner}>
+          <Text style={styles.claimBannerTitle}>Your Claim</Text>
+          <Text style={styles.claimBannerText}>
+            {claims[0]?.status === "pending"
+              ? "Your ownership request is being reviewed."
+              : claims[0]?.status === "rejected"
+                ? "Your last claim was not approved."
+                : "Your claim has been approved."}
+          </Text>
+        </View>
+      ) : null}
 
       <View
         style={[
-          styles.summaryCard,
-          van.subscriptionTier === "pro" && styles.proSummaryCard,
+          styles.heroCard,
+          van.subscriptionTier === "pro" && styles.heroCardPro,
         ]}
       >
-        <View style={styles.summaryTopRow}>
-          <View style={styles.summaryTextBlock}>
-            <Text style={styles.summaryTitle}>{van.name}</Text>
-            <Text style={styles.summarySubtitle}>
-              {vendorName || van.vendorName || "Vendor name not added"}
-            </Text>
+        <View style={styles.heroGlow} />
 
-            <View style={styles.badgeRow}>
+        <View style={styles.heroTopRow}>
+          <View style={styles.heroTextWrap}>
+            <View style={styles.heroBadgeRow}>
               <View
                 style={[
-                  styles.statusBadge,
+                  styles.heroStatusBadge,
                   features.liveStatus
                     ? isLive
-                      ? styles.statusBadgeLive
-                      : styles.statusBadgeOffline
-                    : styles.statusBadgeListed,
+                      ? styles.heroStatusBadgeLive
+                      : styles.heroStatusBadgeOffline
+                    : styles.heroStatusBadgeListed,
                 ]}
               >
-                <Text style={styles.statusBadgeText}>
-                  {features.liveStatus
-                    ? isLive
-                      ? "LIVE"
-                      : "OFFLINE"
-                    : "LISTED"}
+                <Text style={styles.heroStatusBadgeText}>
+                  {features.liveStatus ? (isLive ? "LIVE" : "OFFLINE") : "LISTED"}
                 </Text>
               </View>
 
@@ -1242,382 +1535,161 @@ export default function VendorDashboardScreen() {
               </View>
             </View>
 
-            <Text style={styles.summaryMeta}>
+            <Text style={styles.heroTitle}>{van.name}</Text>
+            <Text style={styles.heroVendorName}>
+              {vendorName || van.vendorName || "Vendor name not added"}
+            </Text>
+            <Text style={styles.heroCuisine}>
               {cuisine || "Cuisine not added yet"}
             </Text>
 
-            <Text style={styles.summarySupport}>
+            <Text style={styles.heroSupport}>
               {listingReady
-                ? "Your listing is looking strong and ready for customers."
-                : "Complete your menu and schedule to strengthen your listing."}
+                ? "Your listing is looking customer-ready."
+                : "Complete your menu and schedule to strengthen trust."}
             </Text>
 
-            <Text style={styles.proVisualSupport}>{proVisualSupport}</Text>
+            <Text style={styles.heroPlanSupport}>{proVisualSupport}</Text>
           </View>
 
-          {hasLogo ? (
-            <Image source={{ uri: logoUri! }} style={styles.logoImage} />
-          ) : features.images && photos[0] ? (
-            <Image source={{ uri: photos[0] }} style={styles.summaryImage} />
+          {heroVisualUri ? (
+            <Image source={{ uri: heroVisualUri }} style={styles.heroImage} />
           ) : null}
         </View>
 
-        <View style={styles.summaryStatsRow}>
-          <View style={styles.summaryStatPill}>
-            <Text style={styles.summaryStatLabel}>Rating</Text>
-            <Text style={styles.summaryStatValue}>{van.rating.toFixed(1)}</Text>
+        <View style={styles.heroStatsRow}>
+          <View style={styles.heroStatCard}>
+            <Text style={styles.heroStatLabel}>Views</Text>
+            <Text style={styles.heroStatValue}>{van.views ?? 0}</Text>
           </View>
 
-          <View style={styles.summaryStatPill}>
-            <Text style={styles.summaryStatLabel}>Views</Text>
-            <Text style={styles.summaryStatValue}>{van.views ?? 0}</Text>
+          <View style={styles.heroStatCard}>
+            <Text style={styles.heroStatLabel}>Directions</Text>
+            <Text style={styles.heroStatValue}>{van.directions ?? 0}</Text>
           </View>
 
-          <View style={styles.summaryStatPill}>
-            <Text style={styles.summaryStatLabel}>Directions</Text>
-            <Text style={styles.summaryStatValue}>{van.directions ?? 0}</Text>
+          <View style={styles.heroStatCard}>
+            <Text style={styles.heroStatLabel}>
+              {van.subscriptionTier === "pro" ? "Conversion" : "Analytics"}
+            </Text>
+            <Text style={styles.heroStatValue}>
+              {van.subscriptionTier === "pro" ? `${conversionRate}%` : "Locked"}
+            </Text>
+
+            {van.subscriptionTier !== "pro" ? (
+              <Text style={styles.heroStatHint}>Pro unlocks conversion insight</Text>
+            ) : null}
           </View>
 
-          <View style={styles.summaryStatPill}>
-            <Text style={styles.summaryStatLabel}>Conversion</Text>
-            <Text style={styles.summaryStatValue}>{conversionRate}%</Text>
+          <View style={styles.heroStatCard}>
+            <Text style={styles.heroStatLabel}>Rating</Text>
+            <Text style={styles.heroStatValue}>{(van.rating ?? 0).toFixed(1)}</Text>
           </View>
         </View>
       </View>
 
-      {van.subscriptionTier !== "pro" && (
-        <View style={styles.pressureCard}>
-          <Text style={styles.pressureText}>
-            You’re getting views — upgrade to reach more customers and increase
-            conversions.
+      <View style={styles.powerCard}>
+        <Text style={styles.powerCardEyebrow}>Performance Signal</Text>
+        <Text style={styles.powerCardTitle}>{performanceSignal?.title}</Text>
+        <Text style={styles.powerCardText}>{performanceSignal?.body}</Text>
+      </View>
+
+      {needsListingAttention ? (
+        <View style={styles.guidanceBanner}>
+          <Text style={styles.guidanceBannerTitle}>
+            Your listing needs a quick update
           </Text>
-        </View>
-      )}
-
-      {van.subscriptionTier === "pro" ? (
-        <>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Performance Insights</Text>
-            <Text style={styles.sectionSubtitle}>
-              Understand how customers interact with your listing.
-            </Text>
-          </View>
-
-          {insightsLoading ? (
-            <View style={styles.cardBox}>
-              <Text style={styles.loadingInlineText}>Loading insights...</Text>
-            </View>
-          ) : (
-            <>
-              <TrendsMiniChart
-                title="Trends Over Time"
-                subtitle="Daily views over the last 30 days"
-                points={insights?.daily_views ?? []}
-              />
-
-              <PeakHoursChart
-                title="Peak Hours"
-                subtitle="When customers engage most"
-                points={insights?.peak_hours ?? []}
-              />
-
-              <View style={styles.insightCard}>
-                <Text style={styles.insightCardTitle}>Heat Map</Text>
-                <Text style={styles.insightCardSubtitle}>
-                  Where your recent customer activity is coming from.
-                </Text>
-
-                {heatmapLoading ? (
-                  <View style={styles.emptyInlineCard}>
-                    <Text style={styles.emptyInlineTitle}>Loading heat map...</Text>
-                    <Text style={styles.emptyInlineText}>
-                      Pulling recent location activity for your listing.
-                    </Text>
-                  </View>
-                ) : heatmapPoints.length === 0 ? (
-                  <View style={styles.emptyInlineCard}>
-                    <Text style={styles.emptyInlineTitle}>No heat map data yet</Text>
-                    <Text style={styles.emptyInlineText}>
-                      Heat map points will appear once customer interactions are recorded with location data.
-                    </Text>
-                  </View>
-                ) : (
-                  <>
-                    <MapView
-                      style={styles.heatmapMap}
-                      pointerEvents="none"
-                      initialRegion={{
-                        latitude: lat || van.lat,
-                        longitude: lng || van.lng,
-                        latitudeDelta: 0.12,
-                        longitudeDelta: 0.12,
-                      }}
-                      scrollEnabled={false}
-                      zoomEnabled={false}
-                      rotateEnabled={false}
-                      pitchEnabled={false}
-                      toolbarEnabled={false}
-                    >
-                      <Marker
-                        coordinate={{
-                          latitude: lat || van.lat,
-                          longitude: lng || van.lng,
-                        }}
-                        title={van.name}
-                        pinColor="#0B2A5B"
-                      />
-
-                      {heatmapPoints.map((point, index) => (
-                        <Marker
-                          key={`${point.lat}-${point.lng}-${index}`}
-                          coordinate={{
-                            latitude: point.lat,
-                            longitude: point.lng,
-                          }}
-                          anchor={{ x: 0.5, y: 0.5 }}
-                        >
-                          <View
-                            style={[
-                              styles.heatmapVisualDot,
-                              point.weight >= 8
-                                ? styles.heatmapVisualDotHot
-                                : point.weight >= 4
-                                  ? styles.heatmapVisualDotWarm
-                                  : styles.heatmapVisualDotCool,
-                            ]}
-                          >
-                            <Text style={styles.heatmapVisualDotText}>
-                              {point.weight}
-                            </Text>
-                          </View>
-                        </Marker>
-                      ))}
-                    </MapView>
-
-                    <View style={styles.heatmapLegend}>
-                      <View style={styles.heatmapLegendItem}>
-                        <View style={[styles.heatmapLegendDot, styles.heatmapDotCool]} />
-                        <Text style={styles.heatmapLegendText}>Low activity</Text>
-                      </View>
-
-                      <View style={styles.heatmapLegendItem}>
-                        <View style={[styles.heatmapLegendDot, styles.heatmapDotWarm]} />
-                        <Text style={styles.heatmapLegendText}>Medium activity</Text>
-                      </View>
-
-                      <View style={styles.heatmapLegendItem}>
-                        <View style={[styles.heatmapLegendDot, styles.heatmapDotHot]} />
-                        <Text style={styles.heatmapLegendText}>High activity</Text>
-                      </View>
-                    </View>
-                  </>
-                )}
-              </View>
-            </>
-          )}
-        </>
-      ) : (
-        <>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Performance Insights</Text>
-            <Text style={styles.sectionSubtitle}>
-              Pro unlocks deeper vendor intelligence.
-            </Text>
-          </View>
-
-          <View style={styles.inlineLockedCard}>
-            <Text style={styles.inlineLockedTitle}>Pro feature</Text>
-            <Text style={styles.inlineLockedText}>
-              Unlock advanced analytics, peak hours, and customer trends.
-            </Text>
-          </View>
-        </>
-      )}
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Branding</Text>
-        <Text style={styles.sectionSubtitle}>
-          Build a stronger identity for your business.
-        </Text>
-      </View>
-
-      <View style={styles.cardBox}>
-        {van.subscriptionTier === "free" ? (
-          <View style={styles.inlineLockedCard}>
-            <Text style={styles.inlineLockedTitle}>Growth required</Text>
-            <Text style={styles.inlineLockedText}>
-              Add your logo to build trust and stand out.
-            </Text>
-          </View>
-        ) : (
-          <>
-            <Pressable style={styles.softButton} onPress={pickLogo}>
-              <Text style={styles.softButtonText}>
-                {logoUri ? "Replace Logo" : "Upload Logo"}
-              </Text>
-            </Pressable>
-
-            {logoUri ? (
-              <View style={styles.logoPreview}>
-                <Image source={{ uri: logoUri }} style={styles.logoLarge} />
-
-                <Pressable
-                  style={styles.galleryDeleteButton}
-                  onPress={removeLogo}
-                >
-                  <Text style={styles.galleryDeleteButtonText}>Remove</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <View style={styles.emptyAssetBox}>
-                <Text style={styles.emptyAssetTitle}>No logo uploaded yet</Text>
-                <Text style={styles.emptyAssetText}>
-                  Add a square logo to strengthen your brand identity.
-                </Text>
-              </View>
-            )}
-          </>
-        )}
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Tier Growth</Text>
-        <Text style={styles.sectionSubtitle}>
-          See what your next plan unlocks for your business.
-        </Text>
-      </View>
-
-      {van.subscriptionTier !== "pro" ? (
-        <View style={styles.cardBox}>
-          <View style={styles.upgradeBadge}>
-            <Text style={styles.upgradeBadgeText}>{currentPlanLabel}</Text>
-          </View>
-
-          <Text style={styles.upgradeTitle}>{upgradeTitle}</Text>
-          <Text style={styles.upgradeText}>{upgradeText}</Text>
-
-          <View style={styles.upgradeFeatureList}>
-            {van.subscriptionTier === "free" ? (
-              <>
-                <Text style={styles.upgradeFeature}>• Add listing photos</Text>
-                <Text style={styles.upgradeFeature}>• Upload your logo</Text>
-                <Text style={styles.upgradeFeature}>• Use live status</Text>
-                <Text style={styles.upgradeFeature}>
-                  • Build stronger customer trust
-                </Text>
-              </>
-            ) : (
-              <>
-                <Text style={styles.upgradeFeature}>
-                  • Unlock advanced analytics
-                </Text>
-                <Text style={styles.upgradeFeature}>
-                  • See trends over time
-                </Text>
-                <Text style={styles.upgradeFeature}>
-                  • Discover your peak hours
-                </Text>
-                <Text style={styles.upgradeFeature}>
-                  • Access premium performance tools
-                </Text>
-              </>
-            )}
-          </View>
+          <Text style={styles.guidanceBannerText}>
+            BiteBeacon opened your Edit section because key listing details are
+            still missing. Completing them helps customers trust your business.
+          </Text>
 
           <Pressable
-            style={styles.upgradeButton}
-            onPress={() => router.push("/vendor/upgrade")}
+            style={styles.guidanceBannerButton}
+            onPress={jumpToEditSection}
           >
-            <Text style={styles.upgradeButtonText}>{upgradeButtonText}</Text>
+            <Text style={styles.guidanceBannerButtonText}>
+              Complete Listing Now
+            </Text>
           </Pressable>
         </View>
-      ) : (
-        <View style={styles.cardBox}>
-          <Text style={styles.proNoteTitle}>Pro Active</Text>
-          <Text style={styles.proNoteText}>
-            You have access to premium analytics, stronger branding, and the
-            most advanced vendor tools currently available.
+      ) : null}
+
+      {monetisationInsight ? (
+        <View style={styles.monetisationCard}>
+          <Text style={styles.monetisationTitle}>
+            {monetisationInsight.title}
           </Text>
+          <Text style={styles.monetisationText}>
+            {monetisationInsight.body}
+          </Text>
+
+          <Pressable
+            style={styles.monetisationButton}
+            onPress={() => router.push("/vendor/upgrade")}
+          >
+            <Text style={styles.monetisationButtonText}>
+              Upgrade to improve performance
+            </Text>
+          </Pressable>
         </View>
-      )}
+      ) : null}
 
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Plan Guide</Text>
-        <Text style={styles.sectionSubtitle}>
-          Understand what each subscription tier unlocks.
+      {upgradeSignal && !monetisationInsight && van.subscriptionTier !== "pro" ? (
+        <View style={styles.upgradeSignalCard}>
+          <Text style={styles.upgradeSignalEyebrow}>
+            {van.subscriptionTier === "free"
+              ? "Free Plan Limitation"
+              : "Growth Plan Opportunity"}
+          </Text>
+
+          <Text style={styles.upgradeSignalTitle}>{upgradeSignal.title}</Text>
+          <Text style={styles.upgradeSignalText}>{upgradeSignal.body}</Text>
+
+          <Text style={styles.upgradeSignalSupportText}>
+            {van.subscriptionTier === "free"
+              ? "Higher tiers give vendors stronger trust signals, better visibility tools, and a more complete customer-facing presence."
+              : "Pro gives vendors stronger discovery support and interpreted performance insight that Growth does not include."}
+          </Text>
+
+          <Pressable
+            style={styles.upgradeSignalButton}
+            onPress={() => router.push("/vendor/upgrade")}
+          >
+            <Text style={styles.upgradeSignalButtonText}>
+              {upgradeSignal.cta}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <View style={styles.quickActionsCard}>
+        <Text style={styles.quickActionsTitle}>Quick Actions</Text>
+        <Text style={styles.quickActionsSubtitle}>
+          The controls you are most likely to use every day.
         </Text>
-      </View>
 
-      <View style={styles.cardBox}>
-        <TierExplanationCard
-          title="Free — Get listed"
-          subtitle="Basic presence"
-          accent="free"
-          isExpanded={expandedTier === "free"}
-          onToggle={() => setExpandedTier("free")}
-        >
-          <Text style={styles.tierItem}>• Listing visibility</Text>
-          <Text style={styles.tierItem}>• Basic views and directions</Text>
-          <Text style={styles.tierItem}>• Standard map presence</Text>
-        </TierExplanationCard>
-
-        <TierExplanationCard
-          title="Growth — Get found"
-          subtitle="Improve visibility"
-          accent="growth"
-          isExpanded={expandedTier === "growth"}
-          onToggle={() => setExpandedTier("growth")}
-        >
-          <Text style={styles.tierItem}>• Photo gallery</Text>
-          <Text style={styles.tierItem}>• Logo branding</Text>
-          <Text style={styles.tierItem}>• Live status</Text>
-          <Text style={styles.tierItem}>• Stronger customer trust</Text>
-        </TierExplanationCard>
-
-        <TierExplanationCard
-          title="Pro — Stand out"
-          subtitle="Premium performance tools"
-          accent="pro"
-          isExpanded={expandedTier === "pro"}
-          onToggle={() => setExpandedTier("pro")}
-        >
-          <Text style={styles.tierItem}>• Advanced analytics</Text>
-          <Text style={styles.tierItem}>• Conversion tracking</Text>
-          <Text style={styles.tierItem}>• Trends over time</Text>
-          <Text style={styles.tierItem}>• Peak hours insights</Text>
-          <Text style={styles.tierItem}>• Heat map insights</Text>
-        </TierExplanationCard>
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <Text style={styles.sectionSubtitle}>
-          Jump into the tools you are most likely to use.
-        </Text>
-      </View>
-
-      <View style={styles.cardBox}>
-        <View style={styles.actionsRow}>
+        <View style={styles.quickActionsGrid}>
           {features.liveStatus ? (
             <Pressable
-              style={[styles.actionButton, styles.actionButtonPrimary]}
+              style={[styles.quickActionButton, styles.quickActionPrimary]}
               onPress={() => handleLiveToggle(!isLive)}
             >
-              <Text style={styles.actionButtonPrimaryText}>
+              <Text style={styles.quickActionPrimaryText}>
                 {isLive ? "Go Offline" : "Go Live"}
               </Text>
             </Pressable>
           ) : (
             <Pressable
-              style={[styles.actionButton, styles.actionButtonLocked]}
+              style={[styles.quickActionButton, styles.quickActionLocked]}
               onPress={() => router.push("/vendor/upgrade")}
             >
-              <Text style={styles.actionButtonPrimaryText}>Go Live 🔒</Text>
+              <Text style={styles.quickActionLockedText}>Go Live 🔒</Text>
             </Pressable>
           )}
 
           <Pressable
-            style={[styles.actionButton, styles.actionButtonSecondary]}
+            style={[styles.quickActionButton, styles.quickActionSecondary]}
             onPress={() =>
               router.push({
                 pathname: "/vendor/[id]",
@@ -1625,409 +1697,891 @@ export default function VendorDashboardScreen() {
               })
             }
           >
-            <Text style={styles.actionButtonSecondaryText}>View Listing</Text>
+            <Text style={styles.quickActionSecondaryText}>View Listing</Text>
           </Pressable>
-        </View>
 
-        <View style={styles.actionsRowLast}>
           {features.reviews ? (
             <Pressable
-              style={[styles.actionButton, styles.actionButtonSecondary]}
+              style={[styles.quickActionButton, styles.quickActionSecondary]}
               onPress={jumpToEditSection}
             >
-              <Text style={styles.actionButtonSecondaryText}>Update Status</Text>
+              <Text style={styles.quickActionSecondaryText}>Update Status</Text>
             </Pressable>
           ) : (
             <Pressable
-              style={[styles.actionButton, styles.actionButtonLocked]}
+              style={[styles.quickActionButton, styles.quickActionLocked]}
               onPress={() => router.push("/vendor/upgrade")}
             >
-              <Text style={styles.actionButtonSecondaryText}>
-                Update Status 🔒
-              </Text>
+              <Text style={styles.quickActionLockedText}>Update Status 🔒</Text>
             </Pressable>
           )}
 
           {features.liveStatus ? (
             <Pressable
-              style={[styles.actionButton, styles.actionButtonSecondary]}
+              style={[styles.quickActionButton, styles.quickActionSecondary]}
               onPress={updateLocation}
             >
-              <Text style={styles.actionButtonSecondaryText}>
+              <Text style={styles.quickActionSecondaryText}>
                 Update Location
               </Text>
             </Pressable>
           ) : (
             <Pressable
-              style={[styles.actionButton, styles.actionButtonLocked]}
+              style={[styles.quickActionButton, styles.quickActionLocked]}
               onPress={() => router.push("/vendor/upgrade")}
             >
-              <Text style={styles.actionButtonSecondaryText}>
-                Update Location 🔒
-              </Text>
+              <Text style={styles.quickActionLockedText}>Update Location 🔒</Text>
             </Pressable>
           )}
-        </View>
-      </View>
 
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Listing Health</Text>
-        <Text style={styles.sectionSubtitle}>
-          Make sure your listing looks complete and trustworthy.
-        </Text>
-      </View>
-
-      <View style={styles.cardBox}>
-        <View style={styles.healthHeader}>
-          <Text style={styles.healthTitle}>
-            {listingReady ? "Ready to publish" : "Needs attention"}
-          </Text>
-          <Text style={styles.healthSubtitle}>
-            Keep the essentials updated so customers trust your listing.
-          </Text>
-        </View>
-
-        <View style={styles.healthRow}>
-          <Text style={styles.healthLabel}>Photos</Text>
-          <Text style={styles.healthValue}>
-            {features.images
-              ? photos.length > 0
-                ? `${photos.length} added`
-                : "Missing"
-              : "Growth required"}
-          </Text>
-        </View>
-
-        <View style={styles.healthRow}>
-          <Text style={styles.healthLabel}>Menu</Text>
-          <Text style={styles.healthValue}>
-            {menu.trim() ? "Added" : "Missing"}
-          </Text>
-        </View>
-
-        <View style={styles.healthRow}>
-          <Text style={styles.healthLabel}>Schedule</Text>
-          <Text style={styles.healthValue}>
-            {schedule.trim() ? "Added" : "Missing"}
-          </Text>
-        </View>
-
-        <View style={styles.healthRow}>
-          <Text style={styles.healthLabel}>Menu PDF</Text>
-          <Text style={styles.healthValue}>
-            {menuPdfName ? "Added" : "Optional"}
-          </Text>
-        </View>
-
-        <View style={styles.healthRow}>
-          <Text style={styles.healthLabel}>Logo</Text>
-          <Text style={styles.healthValue}>
-            {van.subscriptionTier === "free"
-              ? "Growth required"
-              : hasLogo
-                ? "Added"
-                : "Missing"}
-          </Text>
-        </View>
-
-        <View style={styles.healthRowLast}>
-          <Text style={styles.healthLabel}>Live Status</Text>
-          <Text style={styles.healthValue}>
-            {features.liveStatus ? (isLive ? "Enabled" : "Off") : "Growth required"}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Listing Assets</Text>
-        <Text style={styles.sectionSubtitle}>
-          Manage your photo gallery and optional menu PDF.
-        </Text>
-      </View>
-
-      <View style={styles.cardBox}>
-        <Text style={styles.assetSectionTitle}>Photo Gallery</Text>
-        <Text style={styles.assetSectionText}>
-          Add multiple photos to improve your listing. The first photo becomes
-          the main image for now.
-        </Text>
-
-        {features.images ? (
-          <>
-            <Pressable style={styles.softButton} onPress={pickPhotos}>
-              <Text style={styles.softButtonText}>Add Photos</Text>
-            </Pressable>
-
-            {photos.length > 0 ? (
-              <View style={styles.galleryGrid}>
-                {photos.map((photoUri, index) => (
-                  <View key={`${photoUri}-${index}`} style={styles.galleryItem}>
-                    <Image source={{ uri: photoUri }} style={styles.galleryImage} />
-                    <Pressable
-                      style={styles.galleryDeleteButton}
-                      onPress={() => removePhoto(index)}
-                    >
-                      <Text style={styles.galleryDeleteButtonText}>Remove</Text>
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <View style={styles.emptyAssetBox}>
-                <Text style={styles.emptyAssetTitle}>No photos uploaded yet</Text>
-                <Text style={styles.emptyAssetText}>
-                  Add photos to make your listing look more complete.
-                </Text>
-              </View>
-            )}
-          </>
-        ) : (
-          <View style={styles.inlineLockedCard}>
-            <Text style={styles.inlineLockedTitle}>Growth plan required</Text>
-            <Text style={styles.inlineLockedText}>
-              Upgrade to add a photo gallery to your listing.
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.assetDivider} />
-
-        <Text style={styles.assetSectionTitle}>Menu PDF</Text>
-        <Text style={styles.assetSectionText}>
-          Upload a PDF menu for customers.
-        </Text>
-
-        {features.images ? (
-          <>
-            <Pressable style={styles.softButton} onPress={pickMenuPdf}>
-              <Text style={styles.softButtonText}>
-                {menuPdfName ? "Replace Menu PDF" : "Upload Menu PDF"}
+          {van.subscriptionTier === "growth" || van.subscriptionTier === "pro" ? (
+            <Pressable
+              style={[styles.quickActionButton, styles.quickActionSecondary]}
+              onPress={manageSubscriptionFromDashboard}
+            >
+              <Text style={styles.quickActionSecondaryText}>
+                Manage Subscription
               </Text>
             </Pressable>
+          ) : null}
+        </View>
+        {actionRecommendation ? (
+          <View style={styles.recommendationCard}>
+            <Text style={styles.recommendationTitle}>
+              {actionRecommendation.title}
+            </Text>
+            <Text style={styles.recommendationText}>
+              {actionRecommendation.body}
+            </Text>
 
-            {menuPdfName ? (
-              <View style={styles.pdfCard}>
-                <Text style={styles.pdfName}>{menuPdfName}</Text>
+            <Pressable
+              style={styles.recommendationButton}
+              onPress={actionRecommendation.action}
+            >
+              <Text style={styles.recommendationButtonText}>
+                {actionRecommendation.cta}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
 
-                <View style={styles.pdfActionsRow}>
-                  <Pressable
-                    style={styles.pdfActionButton}
-                    onPress={openMenuPdfFromDashboard}
-                  >
-                    <Text style={styles.pdfActionButtonText}>View</Text>
-                  </Pressable>
+      <DashboardAccordionSection
+        title="Performance Insights"
+        subtitle="Use customer behaviour to sharpen visibility and conversion."
+        isOpen={openSections.insights}
+        onToggle={() => toggleSection("insights")}
+      >
+        {van.subscriptionTier === "pro" ? (
+          insightsLoading || heatmapLoading ? (
+            <View style={styles.cardBox}>
+              <Text style={styles.loadingInlineText}>Loading insights...</Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.insightEngineCard}>
+                <Text style={styles.insightEngineEyebrow}>BiteBeacon Insight</Text>
+                <Text style={styles.insightEngineTitle}>
+                  Intelligence based on your recent vendor activity
+                </Text>
 
-                  <Pressable
-                    style={styles.pdfDeleteButton}
-                    onPress={removeMenuPdf}
-                  >
-                    <Text style={styles.pdfDeleteButtonText}>Remove</Text>
-                  </Pressable>
+                <View style={styles.insightSection}>
+                  <Text style={styles.insightSectionLabel}>What we analysed</Text>
+                  <Text style={styles.insightSectionText}>
+                    Based on your last 30 days of listing activity, including
+                    views, directions, customer timing patterns, and recorded
+                    location interaction points.
+                  </Text>
                 </View>
+
+                <View style={styles.insightSection}>
+                  <Text style={styles.insightSectionLabel}>What we’re seeing</Text>
+                  <Text style={styles.insightSectionText}>
+                    {proInsight?.summary}
+                  </Text>
+                </View>
+
+                <View style={styles.insightMetricsRow}>
+                  <View style={styles.insightMetricCard}>
+                    <Text style={styles.insightMetricLabel}>Recent Views</Text>
+                    <Text style={styles.insightMetricValue}>
+                      {proInsight?.recentViews ?? 0}
+                    </Text>
+                  </View>
+
+                  <View style={styles.insightMetricCard}>
+                    <Text style={styles.insightMetricLabel}>Recent Directions</Text>
+                    <Text style={styles.insightMetricValue}>
+                      {proInsight?.recentDirections ?? 0}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.insightMetricsRow}>
+                  <View style={styles.insightMetricCard}>
+                    <Text style={styles.insightMetricLabel}>Conversion</Text>
+                    <Text style={styles.insightMetricValue}>
+                      {Number(proInsight?.recentConversion ?? 0).toFixed(1)}%
+                    </Text>
+                  </View>
+
+                  <View style={styles.insightMetricCard}>
+                    <Text style={styles.insightMetricLabel}>Data Strength</Text>
+                    <Text style={styles.insightMetricValueSmall}>
+                      {proInsight?.hasEnoughData ? "Usable" : "Early"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.insightSection}>
+                  <Text style={styles.insightSectionLabel}>
+                    Best hours to concentrate service
+                  </Text>
+                  <Text style={styles.insightSectionText}>
+                    {proInsight?.hasSpecificTiming
+                      ? `Your strongest engagement windows are ${proInsight.bestHoursText}.`
+                      : "We need more customer activity before we can identify your strongest trading hours with confidence."}
+                  </Text>
+                </View>
+
+                <View style={styles.insightSection}>
+                  <Text style={styles.insightSectionLabel}>Strongest day signal</Text>
+                  <Text style={styles.insightSectionText}>
+                    {proInsight?.topDay?.day
+                      ? `Your strongest recent day was ${formatInsightDay(
+                        proInsight.topDay.day
+                      )} with ${proInsight.topDay.total} view${proInsight.topDay.total === 1 ? "" : "s"
+                      }.`
+                      : "We need more daily activity before we can identify a strongest day."}
+                  </Text>
+                </View>
+
+                <View style={styles.insightSection}>
+                  <Text style={styles.insightSectionLabel}>Quietest day signal</Text>
+                  <Text style={styles.insightSectionText}>
+                    {proInsight?.quietDay?.day
+                      ? `Your quietest recent day was ${formatInsightDay(
+                        proInsight.quietDay.day
+                      )} with ${proInsight.quietDay.total} view${proInsight.quietDay.total === 1 ? "" : "s"
+                      }.`
+                      : "We need more daily activity before we can identify a weaker day pattern."}
+                  </Text>
+                </View>
+
+                <View style={styles.insightSection}>
+                  <Text style={styles.insightSectionLabel}>
+                    Main activity areas we can see
+                  </Text>
+                  <Text style={styles.insightSectionText}>
+                    {proInsight?.hasSpecificLocation
+                      ? "These are the strongest recorded interaction points from your recent location data."
+                      : "We need more location-based interactions before we can identify your strongest demand areas with confidence."}
+                  </Text>
+
+                  {proInsight?.hasSpecificLocation ? (
+                    <View style={styles.locationListCard}>
+                      <Text style={styles.locationListText}>
+                        {proInsight.locationText}
+                      </Text>
+                      <Text style={styles.locationHintText}>
+                        These coordinates are approximate hotspots from customer
+                        interaction locations, not guessed place names.
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                <View style={styles.insightSection}>
+                  <Text style={styles.insightSectionLabel}>Recommended action</Text>
+                  <Text style={styles.insightSectionText}>
+                    {proInsight?.recommendation}
+                  </Text>
+                </View>
+
+                {!proInsight?.hasEnoughData ? (
+                  <View style={styles.lowDataNote}>
+                    <Text style={styles.lowDataNoteTitle}>Need more data</Text>
+                    <Text style={styles.lowDataNoteText}>
+                      We need more customer interactions to give you sharper,
+                      more specific commercial guidance.
+                    </Text>
+                  </View>
+                ) : null}
               </View>
-            ) : (
-              <View style={styles.emptyAssetBox}>
-                <Text style={styles.emptyAssetTitle}>
-                  No menu PDF uploaded yet
+
+              <View style={styles.mapInsightCard}>
+                <Text style={styles.mapInsightTitle}>Interaction Map</Text>
+                <Text style={styles.mapInsightSubtitle}>
+                  Visual view of the strongest recorded interaction points for
+                  your listing.
                 </Text>
-                <Text style={styles.emptyAssetText}>
-                  This is optional, but useful if you want a menu file ready.
-                </Text>
+
+                {heatmapPoints.length === 0 ? (
+                  <View style={styles.emptyInlineCard}>
+                    <Text style={styles.emptyInlineTitle}>No map signal yet</Text>
+                    <Text style={styles.emptyInlineText}>
+                      We need more location-based interactions before your map
+                      becomes useful.
+                    </Text>
+                  </View>
+                ) : (
+                  <MapView
+                    style={styles.heatmapMap}
+                    pointerEvents="none"
+                    initialRegion={{
+                      latitude: lat || van.lat,
+                      longitude: lng || van.lng,
+                      latitudeDelta: 0.18,
+                      longitudeDelta: 0.18,
+                    }}
+                    scrollEnabled={false}
+                    zoomEnabled={false}
+                    rotateEnabled={false}
+                    pitchEnabled={false}
+                    toolbarEnabled={false}
+                  >
+                    <Marker
+                      coordinate={{
+                        latitude: lat || van.lat,
+                        longitude: lng || van.lng,
+                      }}
+                      title={van.name}
+                      pinColor={NAVY}
+                    />
+
+                    {heatmapPoints.map((point, index) => (
+                      <Marker
+                        key={`heatmap-${index}`}
+                        coordinate={{
+                          latitude: point.lat,
+                          longitude: point.lng,
+                        }}
+                        anchor={{ x: 0.5, y: 0.5 }}
+                      >
+                        <View
+                          style={[
+                            styles.heatmapVisualDot,
+                            point.weight >= 8
+                              ? styles.heatmapVisualDotHot
+                              : point.weight >= 4
+                                ? styles.heatmapVisualDotWarm
+                                : styles.heatmapVisualDotCool,
+                          ]}
+                        >
+                          <Text style={styles.heatmapVisualDotText}>
+                            {point.weight}
+                          </Text>
+                        </View>
+                      </Marker>
+                    ))}
+                  </MapView>
+                )}
               </View>
-            )}
-          </>
+            </>
+          )
         ) : (
           <View style={styles.inlineLockedCard}>
-            <Text style={styles.inlineLockedTitle}>Growth plan required</Text>
+            <Text style={styles.inlineLockedTitle}>Pro feature</Text>
             <Text style={styles.inlineLockedText}>
-              Upgrade to upload a PDF version of your menu.
+              Upgrade to Pro to unlock interpreted insights from your views,
+              directions, timing patterns, and location interaction data.
             </Text>
           </View>
         )}
-      </View>
+      </DashboardAccordionSection>
 
-      <View
-        style={styles.sectionHeader}
-
+      <DashboardAccordionSection
+        title="Branding"
+        subtitle="Strengthen trust and make your business look more premium."
+        isOpen={openSections.branding}
+        onToggle={() => toggleSection("branding")}
       >
-        <Text style={styles.sectionTitle}>Edit Listing</Text>
-        <Text style={styles.sectionSubtitle}>
-          Update the details customers see on your public profile.
-        </Text>
-      </View>
-
-      <View
-        style={styles.cardBox}
-        onLayout={(event) => setEditSectionY(event.nativeEvent.layout.y)}
-      >
-        <Text style={styles.label}>Van name</Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="Van name"
-          placeholderTextColor="#7A7A7A"
-        />
-
-        <Text style={styles.label}>Vendor name</Text>
-        <TextInput
-          style={styles.input}
-          value={vendorName}
-          onChangeText={setVendorName}
-          placeholder="Vendor name"
-          placeholderTextColor="#7A7A7A"
-        />
-
-        <Text style={styles.label}>Cuisine</Text>
-        <TextInput
-          style={styles.input}
-          value={cuisine}
-          onChangeText={setCuisine}
-          placeholder="Cuisine"
-          placeholderTextColor="#7A7A7A"
-        />
-
-        <Text style={styles.label}>Menu</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          value={menu}
-          onChangeText={setMenu}
-          placeholder="Menu"
-          placeholderTextColor="#7A7A7A"
-          multiline
-        />
-
-        <Text style={styles.label}>Schedule</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          value={schedule}
-          onChangeText={setSchedule}
-          placeholder="Weekly schedule"
-          placeholderTextColor="#7A7A7A"
-          multiline
-        />
-
-        <Text style={styles.label}>Food categories</Text>
-        <TextInput
-          style={styles.input}
-          value={foodCategorySearch}
-          onChangeText={setFoodCategorySearch}
-          placeholder="Search food categories"
-          placeholderTextColor="#7A7A7A"
-        />
-
-        <View style={styles.checkboxGroup}>
-          {filteredFoodCategoryOptions.map((category) => {
-            const isSelected = foodCategories.includes(category);
-
-            return (
-              <Pressable
-                key={category}
-                style={[
-                  styles.checkboxChip,
-                  isSelected && styles.checkboxChipSelected,
-                ]}
-                onPress={() => toggleFoodCategory(category)}
-              >
-                <Text
-                  style={[
-                    styles.checkboxChipText,
-                    isSelected && styles.checkboxChipTextSelected,
-                  ]}
-                >
-                  {isSelected ? "✓ " : ""}
-                  {category}
+        <View style={styles.cardBox}>
+          {van.subscriptionTier === "free" ? (
+            <View style={styles.inlineLockedCard}>
+              <Text style={styles.inlineLockedTitle}>Growth required</Text>
+              <Text style={styles.inlineLockedText}>
+                Add your logo to build trust and stand out more clearly.
+              </Text>
+            </View>
+          ) : (
+            <>
+              <Pressable style={styles.softButton} onPress={pickLogo}>
+                <Text style={styles.softButtonText}>
+                  {logoUri ? "Replace Logo" : "Upload Logo"}
                 </Text>
               </Pressable>
-            );
-          })}
+
+              {logoUri ? (
+                <View style={styles.logoPreview}>
+                  <Image source={{ uri: logoUri }} style={styles.logoLarge} />
+
+                  <Pressable
+                    style={styles.galleryDeleteButton}
+                    onPress={removeLogo}
+                  >
+                    <Text style={styles.galleryDeleteButtonText}>Remove</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.emptyAssetBox}>
+                  <Text style={styles.emptyAssetTitle}>No logo uploaded yet</Text>
+                  <Text style={styles.emptyAssetText}>
+                    Add a square logo to give your listing a stronger brand identity.
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
         </View>
+      </DashboardAccordionSection>
 
-        {filteredFoodCategoryOptions.length === 0 ? (
-          <Text style={styles.categorySearchEmptyText}>
-            No matching categories found.
-          </Text>
-        ) : null}
+      <DashboardAccordionSection
+        title="Tier Growth"
+        subtitle="See exactly what your next plan adds to your business."
+        isOpen={openSections.growth}
+        onToggle={() => toggleSection("growth")}
+      >
+        <View style={styles.cardBox}>
+          {van.subscriptionTier !== "pro" ? (
+            <>
+              <View style={styles.upgradeBadge}>
+                <Text style={styles.upgradeBadgeText}>{currentPlanLabel}</Text>
+              </View>
 
-        {features.reviews ? (
-          <>
-            <Text style={styles.label}>Status Update</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={vendorMessage}
-              onChangeText={setVendorMessage}
-              placeholder="Share a quick update for today"
-              placeholderTextColor="#7A7A7A"
-              multiline
-              maxLength={140}
-            />
-          </>
-        ) : (
-          <View style={styles.inlineLockedCard}>
-            <Text style={styles.inlineLockedTitle}>Growth plan required</Text>
-            <Text style={styles.inlineLockedText}>
-              Upgrade to post daily status updates and offers.
+              <Text style={styles.upgradeTitle}>
+                {van.subscriptionTier === "free"
+                  ? "Upgrade to Growth"
+                  : "Upgrade to Pro"}
+              </Text>
+
+              <Text style={styles.upgradeText}>
+                {van.subscriptionTier === "free"
+                  ? "Turn a basic listing into a stronger customer-facing presence with live visibility, branding, menu uploads, and status updates."
+                  : "Unlock BiteBeacon’s strongest vendor advantage with interpreted analytics, priority discovery, and deeper commercial guidance."}
+              </Text>
+
+              <View style={styles.upgradeFeatureList}>
+                {van.subscriptionTier === "free" ? (
+                  <>
+                    <Text style={styles.upgradeFeature}>• Go LIVE when you are open</Text>
+                    <Text style={styles.upgradeFeature}>• Add photos and logo branding</Text>
+                    <Text style={styles.upgradeFeature}>• Upload a menu PDF</Text>
+                    <Text style={styles.upgradeFeature}>• Post daily status updates</Text>
+                    <Text style={styles.upgradeFeature}>• Update your trading location</Text>
+                    <Text style={styles.upgradeFeature}>• Build more trust with customers</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.upgradeFeature}>• Priority visibility on the map</Text>
+                    <Text style={styles.upgradeFeature}>• Featured vendor presence</Text>
+                    <Text style={styles.upgradeFeature}>• Trending vendor boost</Text>
+                    <Text style={styles.upgradeFeature}>• Interpreted insight engine</Text>
+                    <Text style={styles.upgradeFeature}>• Best-hour recommendations</Text>
+                    <Text style={styles.upgradeFeature}>• Area activity hotspots</Text>
+                    <Text style={styles.upgradeFeature}>• Conversion guidance</Text>
+                  </>
+                )}
+              </View>
+
+              <Text style={styles.upgradeSupportText}>
+                {van.subscriptionTier === "free"
+                  ? "Growth is built to help your listing look more active, more complete, and more likely to convert views into visits."
+                  : "Pro is built for vendors who want sharper guidance from real activity, not just raw numbers."}
+              </Text>
+
+              <Pressable
+                style={styles.upgradeButton}
+                onPress={() => router.push("/vendor/upgrade")}
+              >
+                <Text style={styles.upgradeButtonText}>
+                  {van.subscriptionTier === "free"
+                    ? "Upgrade to Growth"
+                    : "Upgrade to Pro"}
+                </Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text style={styles.proNoteTitle}>Pro Active</Text>
+              <Text style={styles.proNoteText}>
+                Your listing already has BiteBeacon’s highest level of visibility,
+                premium presentation, and interpreted performance insight.
+              </Text>
+            </>
+          )}
+        </View>
+      </DashboardAccordionSection>
+
+      <DashboardAccordionSection
+        title="Plan Guide"
+        subtitle="Understand what each subscription tier unlocks."
+        isOpen={openSections.guide}
+        onToggle={() => toggleSection("guide")}
+      >
+        <View style={styles.cardBox}>
+          <TierExplanationCard
+            title="Free — Get discovered"
+            subtitle="Your starting point"
+            accent="free"
+            isExpanded={expandedTier === "free"}
+            onToggle={() => setExpandedTier("free")}
+          >
+            <Text style={styles.tierItem}>• Appear on the BiteBeacon map</Text>
+            <Text style={styles.tierItem}>• Let customers view your listing</Text>
+            <Text style={styles.tierItem}>
+              • Track customer interest through views and directions
+            </Text>
+            <Text style={styles.tierItem}>• Build early traction and awareness</Text>
+
+            <Text style={styles.tierHint}>
+              Best for getting listed and starting your presence.
+            </Text>
+          </TierExplanationCard>
+
+          <TierExplanationCard
+            title="Growth — Turn views into customers"
+            subtitle="Professional vendor tools"
+            accent="growth"
+            isExpanded={expandedTier === "growth"}
+            onToggle={() => setExpandedTier("growth")}
+          >
+            <Text style={styles.tierItem}>• Go LIVE when you are open</Text>
+            <Text style={styles.tierSub}>
+              Shown more actively when customers are looking for food
+            </Text>
+
+            <Text style={styles.tierItem}>• Add photos and logo branding</Text>
+            <Text style={styles.tierSub}>
+              Build trust faster with a stronger visual presence
+            </Text>
+
+            <Text style={styles.tierItem}>• Upload a menu PDF</Text>
+            <Text style={styles.tierSub}>
+              Help customers decide before they arrive
+            </Text>
+
+            <Text style={styles.tierItem}>• Post status updates</Text>
+            <Text style={styles.tierSub}>
+              Keep your listing fresh with daily updates or offers
+            </Text>
+
+            <Text style={styles.tierItem}>• Update your location</Text>
+            <Text style={styles.tierSub}>
+              Stay relevant if you trade in different places
+            </Text>
+
+            <Text style={styles.tierHint}>
+              Built to improve trust, visibility, and conversion.
+            </Text>
+          </TierExplanationCard>
+
+          <TierExplanationCard
+            title="Pro — Dominate visibility with real insight"
+            subtitle="Premium discovery and performance intelligence"
+            accent="pro"
+            isExpanded={expandedTier === "pro"}
+            onToggle={() => setExpandedTier("pro")}
+          >
+            <Text style={styles.tierItem}>• Everything in Growth</Text>
+
+            <Text style={styles.tierItem}>• Priority visibility on the map</Text>
+            <Text style={styles.tierSub}>
+              Pro vendors are ranked ahead of lower tiers in discovery
+            </Text>
+
+            <Text style={styles.tierItem}>• Featured vendor presence</Text>
+            <Text style={styles.tierSub}>
+              Reinforces a stronger premium position across the app
+            </Text>
+
+            <Text style={styles.tierItem}>• Trending vendor boost</Text>
+            <Text style={styles.tierSub}>
+              High-performing Pro listings gain extra social proof
+            </Text>
+
+            <Text style={styles.tierItem}>• Interpreted insight engine</Text>
+            <Text style={styles.tierSub}>
+              Get actionable recommendations from your real interaction data
+            </Text>
+
+            <Text style={styles.tierItem}>• Best-hour recommendations</Text>
+            <Text style={styles.tierSub}>
+              Understand when customer engagement is strongest
+            </Text>
+
+            <Text style={styles.tierItem}>• Area activity hotspots</Text>
+            <Text style={styles.tierSub}>
+              See the strongest interaction points from recorded location data
+            </Text>
+
+            <Text style={styles.tierItem}>• Conversion guidance</Text>
+            <Text style={styles.tierSub}>
+              Understand whether visibility is turning into real visit intent
+            </Text>
+
+            <Text style={styles.tierHint}>
+              Built for vendors who want to outperform competitors and make smarter
+              decisions from real data.
+            </Text>
+          </TierExplanationCard>
+        </View>
+      </DashboardAccordionSection>
+
+      <DashboardAccordionSection
+        title="Listing Health"
+        subtitle="Check whether your public listing looks complete and trustworthy."
+        isOpen={openSections.health}
+        onToggle={() => toggleSection("health")}
+      >
+        <View style={styles.cardBox}>
+          <View style={styles.healthHeader}>
+            <Text style={styles.healthTitle}>
+              {listingReady ? "Ready to publish" : "Needs attention"}
+            </Text>
+            <Text style={styles.healthSubtitle}>
+              Keep the essentials updated so customers trust your listing.
             </Text>
           </View>
-        )}
 
-        {features.liveStatus ? (
-          <View style={styles.liveRow}>
-            <Text style={styles.liveLabel}>Live now</Text>
-            <Switch
-              value={isLive}
-              onValueChange={(value) => handleLiveToggle(value)}
-            />
+          <View style={styles.healthRow}>
+            <Text style={styles.healthLabel}>Photos</Text>
+            <Text style={styles.healthValue}>
+              {features.images
+                ? photos.length > 0
+                  ? `${photos.length} added`
+                  : "Missing"
+                : "Growth required"}
+            </Text>
           </View>
-        ) : (
-          <View style={styles.liveRow}>
-            <Text style={styles.liveLabel}>Live now</Text>
-            <Text style={styles.liveLockedText}>Growth required</Text>
+
+          <View style={styles.healthRow}>
+            <Text style={styles.healthLabel}>Menu</Text>
+            <Text style={styles.healthValue}>
+              {menu.trim() ? "Added" : "Missing"}
+            </Text>
           </View>
-        )}
 
-        <Pressable
-          style={[styles.primaryButton, isSaving && { opacity: 0.7 }]}
-          onPress={() => {
-            if (!isSaving) saveChanges();
-          }}
-          disabled={isSaving}
-        >
+          <View style={styles.healthRow}>
+            <Text style={styles.healthLabel}>Schedule</Text>
+            <Text style={styles.healthValue}>
+              {schedule.trim() ? "Added" : "Missing"}
+            </Text>
+          </View>
 
-          <Text style={styles.primaryButtonText}>
-            {isSaving ? "Saving Changes..." : "Save Changes"}
+          <View style={styles.healthRow}>
+            <Text style={styles.healthLabel}>Menu PDF</Text>
+            <Text style={styles.healthValue}>
+              {menuPdfName ? "Added" : "Optional"}
+            </Text>
+          </View>
+
+          <View style={styles.healthRow}>
+            <Text style={styles.healthLabel}>Logo</Text>
+            <Text style={styles.healthValue}>
+              {van.subscriptionTier === "free"
+                ? "Growth required"
+                : hasLogo
+                  ? "Added"
+                  : "Missing"}
+            </Text>
+          </View>
+
+          <View style={styles.healthRowLast}>
+            <Text style={styles.healthLabel}>Live Status</Text>
+            <Text style={styles.healthValue}>
+              {features.liveStatus ? (isLive ? "Enabled" : "Off") : "Growth required"}
+            </Text>
+          </View>
+        </View>
+      </DashboardAccordionSection>
+
+      <DashboardAccordionSection
+        title="Listing Assets"
+        subtitle="Manage your gallery and optional menu PDF."
+        isOpen={openSections.assets}
+        onToggle={() => toggleSection("assets")}
+      >
+        <View style={styles.cardBox}>
+          <Text style={styles.assetSectionTitle}>Photo Gallery</Text>
+          <Text style={styles.assetSectionText}>
+            Add multiple photos to improve your listing. The first photo becomes
+            the main image for now.
           </Text>
-        </Pressable>
 
-        <Pressable
-          style={styles.softButton}
-          onPress={() =>
-            router.replace({
-              pathname: "/vendor/[id]",
-              params: { id: van.id },
-            })
-          }
-        >
-          <Text style={styles.softButtonText}>Back to Vendor Page</Text>
-        </Pressable>
-      </View>
+          {features.images ? (
+            <>
+              <Pressable style={styles.softButton} onPress={pickPhotos}>
+                <Text style={styles.softButtonText}>Add Photos</Text>
+              </Pressable>
 
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Account Actions</Text>
-        <Text style={styles.sectionSubtitle}>
-          Sign out or permanently remove your listing.
-        </Text>
-      </View>
+              {photos.length > 0 ? (
+                <View style={styles.galleryGrid}>
+                  {photos.map((photoUri, index) => (
+                    <View key={`photo-${index}`} style={styles.galleryItem}>
+                      <Image source={{ uri: photoUri }} style={styles.galleryImage} />
+                      <Pressable
+                        style={styles.galleryDeleteButton}
+                        onPress={() => removePhoto(index)}
+                      >
+                        <Text style={styles.galleryDeleteButtonText}>Remove</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyAssetBox}>
+                  <Text style={styles.emptyAssetTitle}>No photos uploaded yet</Text>
+                  <Text style={styles.emptyAssetText}>
+                    Add photos to make your listing look more complete.
+                  </Text>
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={styles.inlineLockedCard}>
+              <Text style={styles.inlineLockedTitle}>Growth plan required</Text>
+              <Text style={styles.inlineLockedText}>
+                Upgrade to add a photo gallery to your listing.
+              </Text>
+            </View>
+          )}
 
-      <View style={styles.cardBox}>
-        <Pressable style={styles.softButton} onPress={handleLogout}>
-          <Text style={styles.softButtonText}>Log Out</Text>
-        </Pressable>
+          <View style={styles.assetDivider} />
 
-        <Pressable style={styles.deleteButton} onPress={deleteListing}>
-          <Text style={styles.deleteButtonText}>Delete Listing</Text>
-        </Pressable>
-      </View>
+          <Text style={styles.assetSectionTitle}>Menu PDF</Text>
+          <Text style={styles.assetSectionText}>
+            Upload a PDF menu for customers.
+          </Text>
+
+          {features.images ? (
+            <>
+              <Pressable style={styles.softButton} onPress={pickMenuPdf}>
+                <Text style={styles.softButtonText}>
+                  {menuPdfName ? "Replace Menu PDF" : "Upload Menu PDF"}
+                </Text>
+              </Pressable>
+
+              {menuPdfName ? (
+                <View style={styles.pdfCard}>
+                  <Text style={styles.pdfName}>{menuPdfName}</Text>
+
+                  <View style={styles.pdfActionsRow}>
+                    <Pressable
+                      style={styles.pdfActionButton}
+                      onPress={openMenuPdfFromDashboard}
+                    >
+                      <Text style={styles.pdfActionButtonText}>View</Text>
+                    </Pressable>
+
+                    <Pressable
+                      style={styles.pdfDeleteButton}
+                      onPress={removeMenuPdf}
+                    >
+                      <Text style={styles.pdfDeleteButtonText}>Remove</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.emptyAssetBox}>
+                  <Text style={styles.emptyAssetTitle}>
+                    No menu PDF uploaded yet
+                  </Text>
+                  <Text style={styles.emptyAssetText}>
+                    This is optional, but useful if you want a menu file ready.
+                  </Text>
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={styles.inlineLockedCard}>
+              <Text style={styles.inlineLockedTitle}>Growth plan required</Text>
+              <Text style={styles.inlineLockedText}>
+                Upgrade to upload a PDF version of your menu.
+              </Text>
+            </View>
+          )}
+        </View>
+      </DashboardAccordionSection>
+
+      <DashboardAccordionSection
+        title="Edit Listing"
+        subtitle="Update the details customers see on your public profile."
+        isOpen={openSections.edit}
+        onToggle={() => toggleSection("edit")}
+      >
+        <View style={styles.cardBox}>
+          <Text style={styles.label}>Van name</Text>
+          <TextInput
+            style={styles.input}
+            value={name}
+            onChangeText={setName}
+            placeholder="Van name"
+            placeholderTextColor="#7A7A7A"
+          />
+
+          <Text style={styles.label}>Vendor name</Text>
+          <TextInput
+            style={styles.input}
+            value={vendorName}
+            onChangeText={setVendorName}
+            placeholder="Vendor name"
+            placeholderTextColor="#7A7A7A"
+          />
+
+          <Text style={styles.label}>Cuisine</Text>
+          <TextInput
+            style={styles.input}
+            value={cuisine}
+            onChangeText={setCuisine}
+            placeholder="Cuisine"
+            placeholderTextColor="#7A7A7A"
+          />
+
+          <Text style={styles.label}>Menu</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            value={menu}
+            onChangeText={setMenu}
+            placeholder="Menu"
+            placeholderTextColor="#7A7A7A"
+            multiline
+          />
+
+          <Text style={styles.label}>Schedule</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            value={schedule}
+            onChangeText={setSchedule}
+            placeholder="Weekly schedule"
+            placeholderTextColor="#7A7A7A"
+            multiline
+          />
+
+          <Text style={styles.label}>Food categories</Text>
+          <TextInput
+            style={styles.input}
+            value={foodCategorySearch}
+            onChangeText={setFoodCategorySearch}
+            placeholder="Search food categories"
+            placeholderTextColor="#7A7A7A"
+          />
+
+          <View style={styles.checkboxGroup}>
+            {filteredFoodCategoryOptions.map((category) => {
+              const isSelected = foodCategories.includes(category);
+
+              return (
+                <Pressable
+                  key={category}
+                  style={[
+                    styles.checkboxChip,
+                    isSelected && styles.checkboxChipSelected,
+                  ]}
+                  onPress={() => toggleFoodCategory(category)}
+                >
+                  <Text
+                    style={[
+                      styles.checkboxChipText,
+                      isSelected && styles.checkboxChipTextSelected,
+                    ]}
+                  >
+                    {isSelected ? "✓ " : ""}
+                    {category}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {filteredFoodCategoryOptions.length === 0 ? (
+            <Text style={styles.categorySearchEmptyText}>
+              No matching categories found.
+            </Text>
+          ) : null}
+
+          {features.reviews ? (
+            <>
+              <Text style={styles.label}>Status Update</Text>
+              <View>
+                <TextInput
+                  ref={statusUpdateInputRef}
+                  style={[styles.input, styles.textArea]}
+                  value={vendorMessage}
+                  onChangeText={setVendorMessage}
+                  placeholder="Share a quick update for today"
+                  placeholderTextColor="#7A7A7A"
+                  multiline
+                  maxLength={140}
+                />
+              </View>
+            </>
+          ) : (
+            <View style={styles.inlineLockedCard}>
+              <Text style={styles.inlineLockedTitle}>Growth plan required</Text>
+              <Text style={styles.inlineLockedText}>
+                Upgrade to post daily status updates and offers.
+              </Text>
+            </View>
+          )}
+
+          {features.liveStatus ? (
+            <View style={styles.liveRow}>
+              <Text style={styles.liveLabel}>Live now</Text>
+              <Switch
+                value={isLive}
+                onValueChange={(value) => handleLiveToggle(value)}
+              />
+            </View>
+          ) : (
+            <View style={styles.liveRow}>
+              <Text style={styles.liveLabel}>Live now</Text>
+              <Text style={styles.liveLockedText}>Growth required</Text>
+            </View>
+          )}
+
+          <Pressable
+            style={[styles.primaryButton, isSaving && { opacity: 0.7 }]}
+            onPress={() => {
+              if (!isSaving) saveChanges();
+            }}
+            disabled={isSaving}
+          >
+            <Text style={styles.primaryButtonText}>
+              {isSaving ? "Saving Changes..." : "Save Changes"}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.softButton}
+            onPress={() =>
+              router.replace({
+                pathname: "/vendor/[id]",
+                params: { id: van.id },
+              })
+            }
+          >
+            <Text style={styles.softButtonText}>Back to Vendor Page</Text>
+          </Pressable>
+        </View>
+      </DashboardAccordionSection>
+
+      <DashboardAccordionSection
+        title="Account Actions"
+        subtitle="Sign out or permanently remove your listing."
+        isOpen={openSections.account}
+        onToggle={() => toggleSection("account")}
+      >
+        <View style={styles.cardBox}>
+          <Pressable style={styles.softButton} onPress={handleLogout}>
+            <Text style={styles.softButtonText}>Log Out</Text>
+          </Pressable>
+
+          <Pressable style={styles.deleteButton} onPress={deleteListing}>
+            <Text style={styles.deleteButtonText}>Delete Listing</Text>
+          </Pressable>
+        </View>
+      </DashboardAccordionSection>
 
       <Pressable
         style={styles.manageButton}
@@ -2039,13 +2593,10 @@ export default function VendorDashboardScreen() {
   );
 }
 
-const thinOrange = "rgba(255,122,0,0.35)";
-const thinBlack = "rgba(0,0,0,0.14)";
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0B2A5B",
+    backgroundColor: NAVY,
   },
 
   content: {
@@ -2056,7 +2607,7 @@ const styles = StyleSheet.create({
 
   centered: {
     flex: 1,
-    backgroundColor: "#0B2A5B",
+    backgroundColor: NAVY,
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
@@ -2065,19 +2616,19 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#FFFFFF",
+    color: WHITE,
   },
 
   loadingInlineText: {
     fontSize: 14,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     fontWeight: "700",
   },
 
   notFoundTitle: {
     fontSize: 26,
     fontWeight: "800",
-    color: "#FFFFFF",
+    color: WHITE,
     marginBottom: 12,
   },
 
@@ -2090,7 +2641,7 @@ const styles = StyleSheet.create({
   },
 
   headerBlock: {
-    marginBottom: 22,
+    marginBottom: 18,
   },
 
   headerTopRow: {
@@ -2113,11 +2664,11 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: WHITE,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: "#FF7A00",
+    borderColor: ORANGE,
   },
 
   accountIconText: {
@@ -2127,44 +2678,302 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 30,
     fontWeight: "800",
-    color: "#FFFFFF",
+    color: WHITE,
     marginBottom: 8,
   },
 
   headerSubtitle: {
     fontSize: 15,
     color: "rgba(255,255,255,0.75)",
-    lineHeight: 24,
+    lineHeight: 22,
   },
 
-  summaryCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 24,
+  claimBanner: {
+    backgroundColor: "rgba(255,122,0,0.12)",
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: SOFT_BORDER,
+  },
+
+  claimBannerTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: ORANGE,
+    marginBottom: 4,
+  },
+
+  claimBannerText: {
+    fontSize: 14,
+    color: WHITE,
+    lineHeight: 20,
+  },
+
+  heroCard: {
+    backgroundColor: CARD_BG,
+    borderRadius: 26,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: thinOrange,
+    borderColor: SOFT_BORDER,
     shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+    overflow: "hidden",
   },
 
-  proSummaryCard: {
-    borderColor: "#FFB357",
-    shadowColor: "#FF7A00",
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
+  heroCardPro: {
+    borderColor: ORANGE_SOFT,
+    shadowColor: ORANGE,
+    shadowOpacity: 0.18,
   },
 
-  cardBox: {
-    backgroundColor: "#FFFFFF",
+  heroGlow: {
+    position: "absolute",
+    top: -30,
+    right: -20,
+    width: 160,
+    height: 160,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,122,0,0.10)",
+  },
+
+  heroTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 14,
+    marginBottom: 18,
+  },
+
+  heroTextWrap: {
+    flex: 1,
+  },
+
+  heroBadgeRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+    marginBottom: 12,
+  },
+
+  heroStatusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+
+  heroStatusBadgeLive: {
+    backgroundColor: GREEN,
+  },
+
+  heroStatusBadgeOffline: {
+    backgroundColor: OFFLINE,
+  },
+
+  heroStatusBadgeListed: {
+    backgroundColor: "#4F6B94",
+  },
+
+  heroStatusBadgeText: {
+    color: WHITE,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+
+  heroTitle: {
+    fontSize: 30,
+    fontWeight: "900",
+    color: DARK_TEXT,
+    marginBottom: 4,
+  },
+
+  heroVendorName: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: MUTED_TEXT,
+    marginBottom: 6,
+  },
+
+  heroCuisine: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#3F4B5B",
+    marginBottom: 10,
+  },
+
+  heroSupport: {
+    fontSize: 14,
+    color: MUTED_TEXT,
+    lineHeight: 21,
+    marginBottom: 8,
+  },
+
+  heroPlanSupport: {
+    fontSize: 13,
+    color: "#8A4B00",
+    lineHeight: 19,
+    fontWeight: "700",
+  },
+
+  heroImage: {
+    width: 90,
+    height: 90,
     borderRadius: 22,
-    padding: 18,
-    marginBottom: 24,
+    backgroundColor: SOFT_BG,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,122,0,0.25)",
+  },
+
+  heroStatsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+
+  heroStatCard: {
+    minWidth: "47%",
+    flex: 1,
+    backgroundColor: NAVY_DEEP,
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+
+  heroStatLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.68)",
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
+
+  heroStatValue: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: WHITE,
+  },
+
+  heroStatHint: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.68)",
+    marginTop: 4,
+    lineHeight: 15,
+  },
+
+  powerCard: {
+    backgroundColor: SOFT_ORANGE_BG,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: thinOrange,
+    borderColor: SOFT_ORANGE_BORDER,
+  },
+
+  guidanceBanner: {
+    backgroundColor: "#F4F8FF",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#C9D9F6",
+  },
+
+  guidanceBannerTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: DARK_TEXT,
+    marginBottom: 6,
+  },
+
+  guidanceBannerText: {
+    fontSize: 14,
+    color: MUTED_TEXT,
+    lineHeight: 20,
+  },
+
+  guidanceBannerButton: {
+    marginTop: 12,
+    backgroundColor: NAVY,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+
+  guidanceBannerButtonText: {
+    color: WHITE,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  powerCardEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#8A4B00",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
+
+  powerCardTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#8A4B00",
+    marginBottom: 6,
+  },
+
+  powerCardText: {
+    fontSize: 14,
+    color: "#8A4B00",
+    lineHeight: 20,
+  },
+
+  monetisationCard: {
+    backgroundColor: "#FFF8F1",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#FFD3AD",
+  },
+
+  monetisationTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#8A4B00",
+    marginBottom: 6,
+  },
+
+  monetisationText: {
+    fontSize: 14,
+    color: "#8A4B00",
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+
+  monetisationButton: {
+    backgroundColor: ORANGE,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+
+  monetisationButtonText: {
+    color: WHITE,
+    fontWeight: "800",
+  },
+
+  upgradeSignalCard: {
+    backgroundColor: CARD_BG,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: SOFT_BORDER,
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -2172,105 +2981,211 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
 
-  pressureCard: {
-    backgroundColor: "#FFF4E8",
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 22,
-    borderWidth: 1,
-    borderColor: "#FFD1A6",
-  },
-
-  pressureText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#8A4B00",
-    lineHeight: 20,
-  },
-
-  summaryTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 14,
-    marginBottom: 16,
-  },
-
-  summaryTextBlock: {
-    flex: 1,
-  },
-
-  summaryTitle: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#0B2A5B",
+  upgradeSignalEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: ORANGE,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
     marginBottom: 6,
   },
 
-  summarySubtitle: {
-    fontSize: 16,
+  upgradeSignalTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: DARK_TEXT,
+    marginBottom: 6,
+  },
+
+  upgradeSignalText: {
+    fontSize: 14,
+    color: MUTED_TEXT,
+    lineHeight: 21,
+    marginBottom: 14,
+  },
+
+  upgradeSignalSupportText: {
+    fontSize: 13,
+    color: "#8A4B00",
+    lineHeight: 19,
     fontWeight: "700",
-    color: "#5F6368",
-    marginBottom: 10,
+    marginBottom: 14,
   },
 
-  badgeRow: {
+  upgradeSignalButton: {
+    backgroundColor: ORANGE,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+  },
+
+  upgradeSignalButtonText: {
+    color: WHITE,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  quickActionsCard: {
+    backgroundColor: CARD_BG,
+    borderRadius: 22,
+    padding: 18,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: SOFT_BORDER,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+
+  quickActionsTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: DARK_TEXT,
+    marginBottom: 4,
+  },
+
+  quickActionsSubtitle: {
+    fontSize: 14,
+    color: MUTED_TEXT,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+
+  quickActionsGrid: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 10,
     flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 12,
   },
 
-  summaryImage: {
-    width: 82,
-    height: 82,
+  recommendationCard: {
+    marginTop: 16,
+    backgroundColor: "#F4F8FF",
     borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#C9D9F6",
   },
 
-  logoImage: {
-    width: 82,
-    height: 82,
-    borderRadius: 18,
-    backgroundColor: "#F5F7FA",
+  recommendationTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: DARK_TEXT,
+    marginBottom: 4,
   },
 
-  logoLarge: {
-    width: 120,
-    height: 120,
-    borderRadius: 24,
-    alignSelf: "center",
-    marginTop: 12,
-    backgroundColor: "#F5F7FA",
+  recommendationText: {
+    fontSize: 14,
+    color: MUTED_TEXT,
+    lineHeight: 20,
+    marginBottom: 10,
   },
 
-  logoPreview: {
+  recommendationButton: {
+    backgroundColor: NAVY,
+    paddingVertical: 10,
+    borderRadius: 12,
     alignItems: "center",
-    marginTop: 10,
   },
 
-  statusBadge: {
+  recommendationButtonText: {
+    color: WHITE,
+    fontWeight: "800",
+  },
+
+  quickActionButton: {
+    width: "48%",
+    minHeight: 56,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 14,
+  },
+
+  quickActionPrimary: {
+    backgroundColor: ORANGE,
+  },
+
+  quickActionSecondary: {
+    backgroundColor: NAVY,
+  },
+
+  quickActionLocked: {
+    backgroundColor: "#F4F4F4",
+    borderWidth: 1,
+    borderColor: "#E2E2E2",
+  },
+
+  quickActionPrimaryText: {
+    color: WHITE,
+    fontSize: 15,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+
+  quickActionSecondaryText: {
+    color: WHITE,
+    fontSize: 15,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+
+  quickActionLockedText: {
+    color: DARK_TEXT,
+    fontSize: 15,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+
+  sectionWrap: {
+    marginBottom: 16,
+  },
+
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 10,
+  },
+
+  sectionHeaderTextWrap: {
+    flex: 1,
+  },
+
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: WHITE,
+    marginBottom: 4,
+  },
+
+  sectionSubtitle: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.72)",
+    lineHeight: 20,
+  },
+
+  sectionTogglePill: {
+    backgroundColor: WHITE,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 999,
+    borderWidth: 1,
+    borderColor: SOFT_BORDER,
   },
 
-  statusBadgeLive: {
-    backgroundColor: "#1DB954",
-  },
-
-  statusBadgeOffline: {
-    backgroundColor: "#888888",
-  },
-
-  statusBadgeListed: {
-    backgroundColor: "#4F6B94",
-  },
-
-  statusBadgeText: {
-    color: "#FFFFFF",
+  sectionToggleText: {
+    color: DARK_TEXT,
     fontSize: 12,
     fontWeight: "800",
+  },
+
+  sectionBody: {
+    gap: 0,
   },
 
   planBadge: {
@@ -2301,90 +3216,19 @@ const styles = StyleSheet.create({
   },
 
   planBadgeTextGrowth: {
-    color: "#0B2A5B",
+    color: DARK_TEXT,
   },
 
   planBadgeTextPro: {
-    color: "#FF7A00",
+    color: ORANGE,
   },
 
-  summaryMeta: {
-    fontSize: 15,
-    color: "#444444",
-    marginBottom: 8,
-    fontWeight: "600",
-  },
-
-  summarySupport: {
-    fontSize: 14,
-    color: "#5F6368",
-    lineHeight: 21,
-    marginBottom: 8,
-  },
-
-  proVisualSupport: {
-    fontSize: 13,
-    color: "#8A4B00",
-    lineHeight: 19,
-    fontWeight: "700",
-  },
-
-  summaryStatsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginTop: 2,
-  },
-
-  summaryStatPill: {
-    minWidth: "47%",
-    flex: 1,
-    backgroundColor: "#F5F7FA",
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: thinBlack,
-  },
-
-  summaryStatLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#6B7280",
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
-
-  summaryStatValue: {
-    fontSize: 19,
-    fontWeight: "800",
-    color: "#0B2A5B",
-  },
-
-  sectionHeader: {
-    marginBottom: 12,
-  },
-
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    marginBottom: 4,
-  },
-
-  sectionSubtitle: {
-    fontSize: 14,
-    color: "rgba(255,255,255,0.72)",
-    lineHeight: 20,
-  },
-
-  insightCard: {
-    backgroundColor: "#FFFFFF",
+  cardBox: {
+    backgroundColor: CARD_BG,
     borderRadius: 22,
     padding: 18,
-    marginBottom: 16,
     borderWidth: 1,
-    borderColor: thinOrange,
+    borderColor: SOFT_BORDER,
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -2392,151 +3236,160 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
 
-  insightCardTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#0B2A5B",
-    marginBottom: 4,
+  insightEngineCard: {
+    backgroundColor: CARD_BG,
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: SOFT_BORDER,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
 
-  insightCardSubtitle: {
-    fontSize: 13,
-    color: "#5F6368",
-    lineHeight: 19,
+  insightEngineEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: ORANGE,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
+
+  insightEngineTitle: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: DARK_TEXT,
     marginBottom: 14,
   },
 
-  trendChart: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 4,
-    height: 128,
-    marginTop: 4,
+  insightSection: {
+    marginBottom: 14,
   },
 
-  trendBarWrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-
-  trendBarTrack: {
-    width: "100%",
-    height: 120,
-    justifyContent: "flex-end",
-    alignItems: "center",
-  },
-
-  trendBarFill: {
-    width: "100%",
-    borderRadius: 999,
-    backgroundColor: "#FF7A00",
-    minHeight: 4,
-  },
-
-  trendAxisRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 12,
-  },
-
-  trendAxisLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#5F6368",
-  },
-
-  hourChart: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 4,
-    height: 146,
-    marginTop: 4,
-  },
-
-  hourBarWrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-
-  hourBarTrack: {
-    width: "100%",
-    height: 120,
-    justifyContent: "flex-end",
-    alignItems: "center",
-  },
-
-  hourBarFill: {
-    width: "100%",
-    borderRadius: 999,
-    backgroundColor: "#FF7A00",
-    minHeight: 4,
-  },
-
-  hourAxisLabel: {
-    marginTop: 8,
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#5F6368",
-    textAlign: "center",
-  },
-
-  hourAxisSpacer: {
-    marginTop: 8,
-    height: 12,
-  },
-
-  heatmapList: {
-    gap: 10,
-  },
-
-  heatmapRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 6,
-  },
-
-  heatmapDotWrap: {
-    width: 28,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  heatmapDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 999,
-  },
-
-  heatmapDotCool: {
-    backgroundColor: "#8FB3E8",
-  },
-
-  heatmapDotWarm: {
-    backgroundColor: "#FFB067",
-  },
-
-  heatmapDotHot: {
-    backgroundColor: "#FF7A00",
-  },
-
-  heatmapTextWrap: {
-    flex: 1,
-  },
-
-  heatmapCoords: {
+  insightSectionLabel: {
     fontSize: 14,
     fontWeight: "800",
-    color: "#0B2A5B",
-    marginBottom: 2,
+    color: DARK_TEXT,
+    marginBottom: 6,
   },
 
-  heatmapMeta: {
-    fontSize: 13,
-    color: "#5F6368",
+  insightSectionText: {
+    fontSize: 14,
+    color: MUTED_TEXT,
+    lineHeight: 21,
+  },
+
+  insightMetricsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 10,
+  },
+
+  insightMetricCard: {
+    flex: 1,
+    backgroundColor: SOFT_BG,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: THIN_BLACK,
+  },
+
+  insightMetricLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: MUTED_TEXT,
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
+
+  insightMetricValue: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: ORANGE,
+  },
+
+  insightMetricValueSmall: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: DARK_TEXT,
+  },
+
+  locationListCard: {
+    marginTop: 10,
+    backgroundColor: SOFT_BG,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: THIN_BLACK,
+  },
+
+  locationListText: {
+    fontSize: 14,
+    color: DARK_TEXT,
+    lineHeight: 21,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+
+  locationHintText: {
+    fontSize: 12,
+    color: MUTED_TEXT,
     lineHeight: 18,
+  },
+
+  lowDataNote: {
+    marginTop: 4,
+    backgroundColor: SOFT_ORANGE_BG,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: SOFT_ORANGE_BORDER,
+  },
+
+  lowDataNoteTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#8A4B00",
+    marginBottom: 4,
+  },
+
+  lowDataNoteText: {
+    fontSize: 13,
+    color: "#8A4B00",
+    lineHeight: 19,
+  },
+
+  mapInsightCard: {
+    backgroundColor: CARD_BG,
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: SOFT_BORDER,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+
+  mapInsightTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: DARK_TEXT,
+    marginBottom: 4,
+  },
+
+  mapInsightSubtitle: {
+    fontSize: 13,
+    color: MUTED_TEXT,
+    lineHeight: 19,
+    marginBottom: 14,
   },
 
   heatmapMap: {
@@ -2544,7 +3397,6 @@ const styles = StyleSheet.create({
     height: 220,
     borderRadius: 18,
     overflow: "hidden",
-    marginBottom: 14,
   },
 
   heatmapVisualDot: {
@@ -2555,7 +3407,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 6,
     borderWidth: 2,
-    borderColor: "#FFFFFF",
+    borderColor: WHITE,
   },
 
   heatmapVisualDotCool: {
@@ -2567,37 +3419,13 @@ const styles = StyleSheet.create({
   },
 
   heatmapVisualDotHot: {
-    backgroundColor: "#FF7A00",
+    backgroundColor: ORANGE,
   },
 
   heatmapVisualDotText: {
-    color: "#FFFFFF",
+    color: WHITE,
     fontSize: 11,
     fontWeight: "800",
-  },
-
-  heatmapLegend: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-  },
-
-  heatmapLegendItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-
-  heatmapLegendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-  },
-
-  heatmapLegendText: {
-    fontSize: 12,
-    color: "#5F6368",
-    fontWeight: "700",
   },
 
   emptyInlineCard: {
@@ -2611,63 +3439,14 @@ const styles = StyleSheet.create({
   emptyInlineTitle: {
     fontSize: 15,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 4,
   },
 
   emptyInlineText: {
     fontSize: 14,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     lineHeight: 20,
-  },
-
-  actionsRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 12,
-  },
-
-  actionsRowLast: {
-    flexDirection: "row",
-    gap: 12,
-  },
-
-  actionButton: {
-    flex: 1,
-    minHeight: 54,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-  },
-
-  actionButtonPrimary: {
-    backgroundColor: "#FF7A00",
-  },
-
-  actionButtonSecondary: {
-    backgroundColor: "#0B2A5B",
-  },
-
-  actionButtonLocked: {
-    backgroundColor: "#F4F4F4",
-    borderWidth: 1,
-    borderColor: "#E2E2E2",
-  },
-
-  actionButtonPrimaryText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-
-  actionButtonSecondaryText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
-    textAlign: "center",
   },
 
   upgradeBadge: {
@@ -2680,7 +3459,7 @@ const styles = StyleSheet.create({
   },
 
   upgradeBadgeText: {
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     fontSize: 12,
     fontWeight: "800",
   },
@@ -2688,14 +3467,22 @@ const styles = StyleSheet.create({
   upgradeTitle: {
     fontSize: 24,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 8,
   },
 
   upgradeText: {
     fontSize: 15,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     lineHeight: 22,
+    marginBottom: 14,
+  },
+
+  upgradeSupportText: {
+    fontSize: 14,
+    color: "#8A4B00",
+    lineHeight: 20,
+    fontWeight: "700",
     marginBottom: 14,
   },
 
@@ -2711,14 +3498,14 @@ const styles = StyleSheet.create({
   },
 
   upgradeButton: {
-    backgroundColor: "#FF7A00",
+    backgroundColor: ORANGE,
     paddingVertical: 15,
     borderRadius: 16,
     alignItems: "center",
   },
 
   upgradeButtonText: {
-    color: "#FFFFFF",
+    color: WHITE,
     fontSize: 16,
     fontWeight: "800",
   },
@@ -2726,13 +3513,13 @@ const styles = StyleSheet.create({
   proNoteTitle: {
     fontSize: 22,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 8,
   },
 
   proNoteText: {
     fontSize: 15,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     lineHeight: 22,
   },
 
@@ -2764,20 +3551,20 @@ const styles = StyleSheet.create({
   tierExplainTitle: {
     fontSize: 16,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 2,
   },
 
   tierExplainSubtitle: {
     fontSize: 13,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     lineHeight: 18,
   },
 
   tierExplainToggle: {
     fontSize: 24,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginLeft: 10,
   },
 
@@ -2792,6 +3579,23 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
+  tierSub: {
+    fontSize: 13,
+    color: MUTED_TEXT,
+    lineHeight: 18,
+    marginTop: 2,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+
+  tierHint: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#8A4B00",
+    lineHeight: 18,
+    marginTop: 10,
+  },
+
   healthHeader: {
     marginBottom: 12,
   },
@@ -2799,13 +3603,13 @@ const styles = StyleSheet.create({
   healthTitle: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 4,
   },
 
   healthSubtitle: {
     fontSize: 14,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     lineHeight: 20,
   },
 
@@ -2827,26 +3631,26 @@ const styles = StyleSheet.create({
 
   healthLabel: {
     fontSize: 14,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     fontWeight: "700",
   },
 
   healthValue: {
     fontSize: 14,
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     fontWeight: "800",
   },
 
   assetSectionTitle: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 6,
   },
 
   assetSectionText: {
     fontSize: 14,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     lineHeight: 21,
     marginBottom: 14,
   },
@@ -2859,11 +3663,11 @@ const styles = StyleSheet.create({
 
   galleryItem: {
     width: "48%",
-    backgroundColor: "#F5F7FA",
+    backgroundColor: SOFT_BG,
     borderRadius: 16,
     padding: 8,
     borderWidth: 1,
-    borderColor: thinBlack,
+    borderColor: THIN_BLACK,
   },
 
   galleryImage: {
@@ -2874,7 +3678,7 @@ const styles = StyleSheet.create({
   },
 
   galleryDeleteButton: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: WHITE,
     borderRadius: 12,
     paddingVertical: 10,
     alignItems: "center",
@@ -2895,17 +3699,17 @@ const styles = StyleSheet.create({
   },
 
   pdfCard: {
-    backgroundColor: "#F5F7FA",
+    backgroundColor: SOFT_BG,
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: thinBlack,
+    borderColor: THIN_BLACK,
   },
 
   pdfName: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 12,
   },
 
@@ -2916,21 +3720,21 @@ const styles = StyleSheet.create({
 
   pdfActionButton: {
     flex: 1,
-    backgroundColor: "#0B2A5B",
+    backgroundColor: NAVY,
     paddingVertical: 12,
     borderRadius: 14,
     alignItems: "center",
   },
 
   pdfActionButtonText: {
-    color: "#FFFFFF",
+    color: WHITE,
     fontSize: 14,
     fontWeight: "700",
   },
 
   pdfDeleteButton: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: WHITE,
     paddingVertical: 12,
     borderRadius: 14,
     alignItems: "center",
@@ -2955,27 +3759,27 @@ const styles = StyleSheet.create({
   emptyAssetTitle: {
     fontSize: 15,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 4,
   },
 
   emptyAssetText: {
     fontSize: 14,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     lineHeight: 20,
   },
 
   label: {
     fontSize: 15,
     fontWeight: "700",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 8,
   },
 
   input: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: WHITE,
     borderWidth: 2,
-    borderColor: "#FF7A00",
+    borderColor: ORANGE,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -2996,7 +3800,7 @@ const styles = StyleSheet.create({
   },
 
   checkboxChip: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: WHITE,
     borderWidth: 1,
     borderColor: "#D9D9D9",
     borderRadius: 999,
@@ -3005,23 +3809,23 @@ const styles = StyleSheet.create({
   },
 
   checkboxChipSelected: {
-    backgroundColor: "#0B2A5B",
-    borderColor: "#0B2A5B",
+    backgroundColor: NAVY,
+    borderColor: NAVY,
   },
 
   checkboxChipText: {
-    color: "#0B2A5B",
+    color: NAVY,
     fontSize: 14,
     fontWeight: "700",
   },
 
   checkboxChipTextSelected: {
-    color: "#FFFFFF",
+    color: WHITE,
   },
 
   categorySearchEmptyText: {
     fontSize: 14,
-    color: "#5F6368",
+    color: MUTED_TEXT,
     marginBottom: 16,
     fontWeight: "600",
   },
@@ -3030,9 +3834,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF3E0",
     borderRadius: 16,
     padding: 14,
-    marginBottom: 16,
     borderWidth: 1,
-    borderColor: thinOrange,
+    borderColor: SOFT_BORDER,
   },
 
   inlineLockedTitle: {
@@ -3049,7 +3852,7 @@ const styles = StyleSheet.create({
   },
 
   liveRow: {
-    backgroundColor: "#F5F7FA",
+    backgroundColor: SOFT_BG,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -3058,13 +3861,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: thinBlack,
+    borderColor: THIN_BLACK,
   },
 
   liveLabel: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
   },
 
   liveLockedText: {
@@ -3074,7 +3877,7 @@ const styles = StyleSheet.create({
   },
 
   primaryButton: {
-    backgroundColor: "#FF7A00",
+    backgroundColor: ORANGE,
     paddingVertical: 15,
     borderRadius: 16,
     alignItems: "center",
@@ -3082,7 +3885,7 @@ const styles = StyleSheet.create({
   },
 
   primaryButtonText: {
-    color: "#FFFFFF",
+    color: WHITE,
     fontSize: 16,
     fontWeight: "800",
   },
@@ -3096,7 +3899,7 @@ const styles = StyleSheet.create({
   },
 
   softButtonText: {
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     fontSize: 16,
     fontWeight: "700",
   },
@@ -3110,7 +3913,7 @@ const styles = StyleSheet.create({
   },
 
   softButtonDarkText: {
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     fontSize: 15,
     fontWeight: "700",
   },
@@ -3124,7 +3927,7 @@ const styles = StyleSheet.create({
   },
 
   deleteButtonText: {
-    color: "#FFFFFF",
+    color: WHITE,
     fontSize: 16,
     fontWeight: "700",
   },
@@ -3134,27 +3937,27 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 16,
     alignItems: "center",
-    backgroundColor: "#0B2A5B",
+    backgroundColor: NAVY,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.25)",
   },
 
   manageButtonText: {
-    color: "#FFFFFF",
+    color: WHITE,
     fontWeight: "700",
   },
 
   claimStatus: {
     fontSize: 16,
     fontWeight: "800",
-    color: "#0B2A5B",
+    color: DARK_TEXT,
     marginBottom: 10,
   },
 
   claimNoteLabel: {
     fontSize: 13,
     fontWeight: "800",
-    color: "#FF7A00",
+    color: ORANGE,
     marginBottom: 6,
   },
 
@@ -3166,7 +3969,21 @@ const styles = StyleSheet.create({
 
   claimPending: {
     fontSize: 14,
-    color: "#888888",
+    color: OFFLINE,
     fontStyle: "italic",
+  },
+
+  logoPreview: {
+    alignItems: "center",
+    marginTop: 10,
+  },
+
+  logoLarge: {
+    width: 120,
+    height: 120,
+    borderRadius: 24,
+    alignSelf: "center",
+    marginTop: 12,
+    backgroundColor: SOFT_BG,
   },
 });

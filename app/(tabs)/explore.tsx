@@ -1,10 +1,13 @@
 import * as Location from "expo-location";
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
   Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,10 +17,6 @@ import {
 } from "react-native";
 import MapView, { MapPressEvent, Marker, Region } from "react-native-maps";
 
-import markerFeatured from "../../assets/markers/marker-featured.png";
-import markerLive from "../../assets/markers/marker-live.png";
-import markerOffline from "../../assets/markers/marker-offline.png";
-import markerSpotted from "../../assets/markers/marker-spotted.png";
 import { getSubscriptionFeatures } from "../../lib/subscriptionFeatures";
 import { getCurrentUser } from "../../services/authService";
 import { createVendor, getAllVendors } from "../../services/vendorService";
@@ -31,10 +30,10 @@ type SpotPin = {
 type FilterType = "all" | "live" | "spotted";
 
 const DEFAULT_REGION: Region = {
-  latitude: 51.5074,
-  longitude: -0.1278,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
+  latitude: 50.266,
+  longitude: -5.0527,
+  latitudeDelta: 0.22,
+  longitudeDelta: 0.22,
 };
 
 const BITEBEACON_MAP_STYLE = [
@@ -93,13 +92,6 @@ const BITEBEACON_MAP_STYLE = [
   },
 ];
 
-function getMarkerImage(van: Van) {
-  if (van.listingSource === "user_spotted") return markerSpotted;
-  if (van.subscriptionTier === "pro") return markerFeatured;
-  if (van.owner_id && van.isLive) return markerLive;
-  return markerOffline;
-}
-
 function getStatusLabel(van: Van) {
   if (van.listingSource === "user_spotted") return "SPOTTED";
   if (getSubscriptionFeatures(van.subscriptionTier).liveStatus) {
@@ -107,6 +99,16 @@ function getStatusLabel(van: Van) {
   }
 
   return "LISTED";
+}
+
+function isTrendingVendor(van: Van) {
+  if (van.subscriptionTier !== "pro") return false;
+  if (van.listingSource === "user_spotted") return false;
+  if ((van.views ?? 0) < 25) return false;
+  if ((van.directions ?? 0) < 5) return false;
+  if ((van.rating ?? 0) < 4.2) return false;
+
+  return true;
 }
 
 function getCardImage(van: Van) {
@@ -154,20 +156,44 @@ export default function MapScreen() {
   const [userRegion, setUserRegion] = useState<Region>(DEFAULT_REGION);
   const [legendOpen, setLegendOpen] = useState(false);
   const [mapReady, setMapReady] = useState(false);
-
+  const [showMapLoadingOverlay, setShowMapLoadingOverlay] = useState(true);
+  const [hasResolvedUserLocation, setHasResolvedUserLocation] = useState(false);
+  const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
   const selectedMarkerScale = useRef(new Animated.Value(1)).current;
   const cardTranslateY = useRef(new Animated.Value(20)).current;
   const cardOpacity = useRef(new Animated.Value(0)).current;
 
+  function focusOnTopVendor() {
+    const topVendor = filteredVans[0];
+
+    if (!topVendor) return;
+
+    mapRef.current?.animateToRegion(
+      {
+        latitude: topVendor.lat,
+        longitude: topVendor.lng,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      },
+      600
+    );
+  }
+
   useEffect(() => {
     requestUserLocation();
+
+    const overlayTimeout = setTimeout(() => {
+      setShowMapLoadingOverlay(false);
+    }, 100); // faster
+
+    return () => {
+      clearTimeout(overlayTimeout);
+    };
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadSupabaseVans();
-    }, [])
-  );
+  useEffect(() => {
+    loadSupabaseVans();
+  }, []);
 
   useEffect(() => {
     const parsedLat = Number(params.lat);
@@ -274,13 +300,43 @@ export default function MapScreen() {
 
   async function requestUserLocation() {
     try {
-      const permission = await Location.requestForegroundPermissionsAsync();
+      const existingPermission = await Location.getForegroundPermissionsAsync();
+
+      let permission = existingPermission;
+
+      if (!existingPermission.granted) {
+        permission = await Location.requestForegroundPermissionsAsync();
+      }
 
       if (permission.status !== "granted") {
+        setLocationPermissionDenied(true);
+        setHasResolvedUserLocation(true);
         return;
       }
 
-      const current = await Location.getCurrentPositionAsync({});
+      setLocationPermissionDenied(false);
+      const lastKnown = await Location.getLastKnownPositionAsync();
+
+      if (lastKnown) {
+        const fastRegion: Region = {
+          latitude: lastKnown.coords.latitude,
+          longitude: lastKnown.coords.longitude,
+          latitudeDelta: 0.05,
+          longitudeDelta: 0.05,
+        };
+
+        setUserRegion(fastRegion);
+        setHasResolvedUserLocation(true);
+
+        if (mapReady && !hasAnimatedToUserLocation.current) {
+          mapRef.current?.animateToRegion(fastRegion, 600);
+          hasAnimatedToUserLocation.current = true;
+        }
+      }
+
+      const current = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
 
       const nextRegion: Region = {
         latitude: current.coords.latitude,
@@ -290,17 +346,20 @@ export default function MapScreen() {
       };
 
       setUserRegion(nextRegion);
+      setHasResolvedUserLocation(true);
 
-      if (mapReady && !hasAnimatedToUserLocation.current) {
+      if (mapReady) {
         mapRef.current?.animateToRegion(nextRegion, 600);
         hasAnimatedToUserLocation.current = true;
       }
     } catch {
-      // keep default region
+      setHasResolvedUserLocation(true);
     }
   }
 
-  async function loadSupabaseVans() {
+  async function loadSupabaseVans(force = false) {
+    if (!force && supabaseVans.length > 0) return;
+
     try {
       const vendors = await getAllVendors();
       setSupabaseVans(vendors);
@@ -326,21 +385,43 @@ export default function MapScreen() {
       : baseVans;
 
     return [...searchedVans].sort((a, b) => {
-      const tierRank = { pro: 3, growth: 2, free: 1 };
+      const aTrending = isTrendingVendor(a);
+      const bTrending = isTrendingVendor(b);
 
-      const aRank = tierRank[a.subscriptionTier ?? "free"];
-      const bRank = tierRank[b.subscriptionTier ?? "free"];
+      if (aTrending && !bTrending) return -1;
+      if (!aTrending && bTrending) return 1;
 
-      if (aRank !== bRank) {
-        return bRank - aRank;
-      }
+      const getPriorityScore = (van: Van) => {
+        let score = 0;
 
-      if (a.isLive && !b.isLive) return -1;
-      if (!a.isLive && b.isLive) return 1;
+        if (van.subscriptionTier === "pro") score += 1000;
+        else if (van.subscriptionTier === "growth") score += 500;
 
-      return b.rating - a.rating;
+        if (van.isLive) score += 200;
+
+        score += (van.directions ?? 0) * 5;
+        score += (van.views ?? 0);
+        score += (van.rating ?? 0) * 50;
+
+        return score;
+      };
+
+      const aScore = getPriorityScore(a);
+      const bScore = getPriorityScore(b);
+
+      return bScore - aScore;
     });
+
   }, [supabaseVans, selectedFilter, searchQuery]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    if (!hasResolvedUserLocation) return;
+    if (hasAnimatedToUserLocation.current) return;
+
+    mapRef.current?.animateToRegion(userRegion, 600);
+    hasAnimatedToUserLocation.current = true;
+  }, [mapReady, hasResolvedUserLocation, userRegion]);
 
   useEffect(() => {
     if (!selectedVan) return;
@@ -486,9 +567,10 @@ export default function MapScreen() {
         rating: 0,
         subscriptionTier: "free",
         foodCategories: [],
+        spottedBy: user.id,
       });
 
-      await loadSupabaseVans();
+      await loadSupabaseVans(true);
       setSelectedVan(null);
       cancelSpotFlow();
       Alert.alert("Success", "Spotted van added to the BiteBeacon map.");
@@ -510,6 +592,12 @@ export default function MapScreen() {
   function recenterMap() {
     setSelectedVan(null);
     setSelectedSpotPin(null);
+
+    if (locationPermissionDenied) {
+      void requestUserLocation();
+      return;
+    }
+
     mapRef.current?.animateToRegion(userRegion, 600);
   }
 
@@ -530,11 +618,7 @@ export default function MapScreen() {
         onPress={handleMapPress}
         onMapReady={() => {
           setMapReady(true);
-
-          if (!hasAnimatedToUserLocation.current) {
-            mapRef.current?.animateToRegion(userRegion, 450);
-            hasAnimatedToUserLocation.current = true;
-          }
+          setShowMapLoadingOverlay(false);
         }}
       >
         {filteredVans.map((van) => {
@@ -546,49 +630,45 @@ export default function MapScreen() {
               coordinate={{ latitude: van.lat, longitude: van.lng }}
               onPress={() => handleMarkerPress(van)}
             >
-              <Animated.View
+              <View
                 style={{
-                  transform: [
-                    {
-                      scale: isSelected
-                        ? selectedMarkerScale
-                        : van.isLive
-                          ? 1.15
-                          : 1,
-                    },
-                  ],
+                  padding: van.subscriptionTier === "pro" ? 6 : 2,
+                  backgroundColor:
+                    van.subscriptionTier === "pro"
+                      ? "#FF7A00"
+                      : "transparent",
+                  borderRadius: 999,
                 }}
               >
-                <Image
-                  source={getMarkerImage(van)}
-                  style={[
-                    styles.markerImage,
-                    van.isLive && {
-                      shadowColor: "#1DB954",
-                      shadowOpacity: 0.8,
-                      shadowRadius: 10,
-                      shadowOffset: { width: 0, height: 0 },
-                    },
-                  ]}
-                  resizeMode="contain"
+                <View
+                  style={{
+                    width: van.subscriptionTier === "pro" ? 18 : 12,
+                    height: van.subscriptionTier === "pro" ? 18 : 12,
+                    borderRadius: 999,
+                    backgroundColor:
+                      van.listingSource === "user_spotted"
+                        ? "#FF7A00"
+                        : van.subscriptionTier === "pro"
+                          ? "#0B2A5B"
+                          : van.isLive
+                            ? "#1DB954"
+                            : "#E53935",
+                  }}
                 />
-              </Animated.View>
+              </View>
             </Marker>
           );
         })}
 
         {selectedSpotPin ? (
-          <Marker coordinate={selectedSpotPin}>
-            <Image
-              source={markerSpotted}
-              style={styles.markerImage}
-              resizeMode="contain"
-            />
-          </Marker>
+          <Marker
+            coordinate={selectedSpotPin}
+            pinColor="#FF7A00"
+          />
         ) : null}
       </MapView>
 
-      {!mapReady ? (
+      {showMapLoadingOverlay && !mapReady ? (
         <View style={styles.loadingOverlay}>
           <Text style={styles.loadingText}>Loading map...</Text>
         </View>
@@ -700,39 +780,23 @@ export default function MapScreen() {
             onPress={() => setLegendOpen(false)}
           >
             <View style={styles.legendItem}>
-              <Image
-                source={markerFeatured}
-                style={styles.legendMarkerImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.legendText}>Featured</Text>
+              <View style={[styles.legendDot, styles.legendDotPro]} />
+              <Text style={styles.legendText}>Pro Vendor</Text>
             </View>
 
             <View style={styles.legendItem}>
-              <Image
-                source={markerLive}
-                style={styles.legendMarkerImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.legendText}>Live now</Text>
+              <View style={[styles.legendDot, styles.legendDotLive]} />
+              <Text style={styles.legendText}>Live Now</Text>
             </View>
 
             <View style={styles.legendItem}>
-              <Image
-                source={markerSpotted}
-                style={styles.legendMarkerImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.legendText}>Community spotted</Text>
+              <View style={[styles.legendDot, styles.legendDotSpotted]} />
+              <Text style={styles.legendText}>Community Spotted</Text>
             </View>
 
             <View style={styles.legendItemLast}>
-              <Image
-                source={markerOffline}
-                style={styles.legendMarkerImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.legendText}>Listed / offline</Text>
+              <View style={[styles.legendDot, styles.legendDotListed]} />
+              <Text style={styles.legendText}>Listed / Offline</Text>
             </View>
           </Pressable>
         )}
@@ -744,6 +808,26 @@ export default function MapScreen() {
           <Text style={styles.spotInstructionText}>
             Tap the map to place the van location.
           </Text>
+        </View>
+      ) : null}
+
+      {locationPermissionDenied ? (
+        <View style={styles.permissionNoticeWrap}>
+          <Text style={styles.permissionNoticeTitle}>
+            Location Permission Off
+          </Text>
+          <Text style={styles.permissionNoticeText}>
+            BiteBeacon is using the default map area because location access was
+            denied. You can still browse listings manually or enable location in
+            your device settings.
+          </Text>
+
+          <Pressable
+            style={styles.permissionButton}
+            onPress={requestUserLocation}
+          >
+            <Text style={styles.permissionButtonText}>Enable Location</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -793,7 +877,23 @@ export default function MapScreen() {
                         </Text>
                       </View>
                     ) : null}
+
+                    {isTrendingVendor(selectedVan) ? (
+                      <View style={styles.bottomCardTrendingBadge}>
+                        <Text style={styles.bottomCardTrendingBadgeText}>
+                          TRENDING
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
+
+                  {selectedVan.subscriptionTier === "free" &&
+                    !selectedVan.temporary &&
+                    selectedVan.owner_id ? (
+                    <Text style={styles.bottomCardUpgradeHint}>
+                      Upgrade to Growth or Pro for stronger visibility.
+                    </Text>
+                  ) : null}
 
                   <Text style={styles.bottomCardMeta}>{selectedVan.cuisine}</Text>
 
@@ -868,47 +968,79 @@ export default function MapScreen() {
         </Pressable>
       </View>
 
-      {spotVisible ? (
+      <Modal
+        visible={spotVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={cancelSpotFlow}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>Spot a Van</Text>
-              <Text style={styles.modalSubtitle}>
-                Add a temporary spotted van for the community.
-              </Text>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboardWrap}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
+          >
+            <View style={styles.modalCard}>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
+                contentContainerStyle={styles.modalScrollContent}
+              >
+                <Text style={styles.modalTitle}>Spot a Van</Text>
+                <Text style={styles.modalSubtitle}>
+                  Add a temporary spotted van for the community.
+                </Text>
 
-              <TextInput
-                style={styles.input}
-                placeholder="Van name"
-                placeholderTextColor="#7A7A7A"
-                value={spotName}
-                onChangeText={setSpotName}
-              />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Van name"
+                  placeholderTextColor="#7A7A7A"
+                  value={spotName}
+                  onChangeText={setSpotName}
+                  returnKeyType="next"
+                />
 
-              <TextInput
-                style={styles.input}
-                placeholder="Cuisine"
-                placeholderTextColor="#7A7A7A"
-                value={spotCuisine}
-                onChangeText={setSpotCuisine}
-              />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Cuisine"
+                  placeholderTextColor="#7A7A7A"
+                  value={spotCuisine}
+                  onChangeText={setSpotCuisine}
+                  returnKeyType="done"
+                />
 
-              <Pressable style={styles.primaryButton} onPress={submitSpotVan}>
-                <Text style={styles.primaryButtonText}>Submit Listing</Text>
-              </Pressable>
+                <Pressable style={styles.primaryButton} onPress={submitSpotVan}>
+                  <Text style={styles.primaryButtonText}>Submit Listing</Text>
+                </Pressable>
 
-              <Pressable style={styles.cancelButton} onPress={cancelSpotFlow}>
-                <Text style={styles.cancelButtonText}>Close</Text>
-              </Pressable>
-            </ScrollView>
-          </View>
+                <Pressable style={styles.cancelButton} onPress={cancelSpotFlow}>
+                  <Text style={styles.cancelButtonText}>Close</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
         </View>
-      ) : null}
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+
+  permissionButton: {
+    marginTop: 10,
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+
+  permissionButtonText: {
+    color: "#0B2A5B",
+    fontWeight: "800",
+    fontSize: 13,
+  },
   container: {
     flex: 1,
     backgroundColor: "#0B2A5B",
@@ -916,16 +1048,6 @@ const styles = StyleSheet.create({
 
   map: {
     flex: 1,
-  },
-
-  markerImage: {
-    width: 40,
-    height: 52,
-  },
-
-  legendMarkerImage: {
-    width: 36,
-    height: 48,
   },
 
   loadingOverlay: {
@@ -1087,6 +1209,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 
+  legendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+  },
+
+  legendDotPro: {
+    backgroundColor: "#0B2A5B",
+  },
+
+  legendDotLive: {
+    backgroundColor: "#1DB954",
+  },
+
+  legendDotSpotted: {
+    backgroundColor: "#FF7A00",
+  },
+
+  legendDotListed: {
+    backgroundColor: "#E53935",
+  },
+
   spotInstructionWrap: {
     position: "absolute",
     top: 164,
@@ -1113,6 +1257,38 @@ const styles = StyleSheet.create({
   },
 
   spotInstructionText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: "rgba(255,255,255,0.82)",
+    fontWeight: "600",
+  },
+
+  permissionNoticeWrap: {
+    position: "absolute",
+    top: 164,
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(11,42,91,0.96)",
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+
+  permissionNoticeTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginBottom: 4,
+  },
+
+  permissionNoticeText: {
     fontSize: 13,
     lineHeight: 19,
     color: "rgba(255,255,255,0.82)",
@@ -1239,10 +1415,30 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
 
+  bottomCardTrendingBadge: {
+    backgroundColor: "#FF7A00",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+
+  bottomCardTrendingBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
   bottomCardFeaturedBadgeText: {
     color: "#FF7A00",
     fontSize: 10,
     fontWeight: "800",
+  },
+
+  bottomCardUpgradeHint: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#FFB357",
+    marginBottom: 6,
   },
 
   bottomCardMeta: {
@@ -1350,21 +1546,31 @@ const styles = StyleSheet.create({
   },
 
   modalOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: "rgba(0,0,0,0.35)",
-    paddingTop: 40,
+    justifyContent: "flex-end",
+  },
+
+  modalKeyboardWrap: {
+    width: "100%",
+    justifyContent: "flex-end",
   },
 
   modalCard: {
     backgroundColor: "#FFFFFF",
-    padding: 20,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: 1,
     borderColor: "rgba(255,122,0,0.35)",
+    maxHeight: "82%",
+    minHeight: 320,
+  },
+
+  modalScrollContent: {
+    paddingBottom: 24,
   },
 
   modalTitle: {

@@ -1,19 +1,23 @@
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { theme } from "../../constants/theme";
+import { isCurrentUserAdmin } from "../../services/adminService";
 import {
   getCurrentUser,
+  getCurrentUserScoutPoints,
   getCurrentUserVendor,
   signOutCurrentUser,
 } from "../../services/authService";
-
-const ADMIN_EMAILS = ["m.l.ashton2024@gmail.com"];
 
 export default function AccountScreen() {
   const [email, setEmail] = useState<string | null>(null);
   const [isVendor, setIsVendor] = useState(false);
   const [vendorId, setVendorId] = useState<string | null>(null);
+  const [scoutPoints, setScoutPoints] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [accountSummaryLoading, setAccountSummaryLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
@@ -22,41 +26,65 @@ export default function AccountScreen() {
   );
 
   async function loadUser() {
+    setLoading(true);
+    setAccountSummaryLoading(true);
+
     const user = await getCurrentUser();
 
     if (!user) {
       setEmail(null);
       setIsVendor(false);
       setVendorId(null);
+      setScoutPoints(0);
+      setAccountSummaryLoading(false);
+      setLoading(false);
+      setIsAdmin(false);
       return;
     }
 
     setEmail(user.email ?? null);
+    try {
+      const adminStatus = await isCurrentUserAdmin();
+      setIsAdmin(adminStatus);
+    } catch {
+      setIsAdmin(false);
+    }
 
     try {
-      const vendor = await getCurrentUserVendor();
+      const [points, vendor] = await Promise.all([
+        getCurrentUserScoutPoints(),
+        getCurrentUserVendor(),
+      ]);
+
+      setScoutPoints(points);
 
       if (vendor) {
         if (vendor.isSuspended) {
           setIsVendor(false);
           setVendorId(null);
+          setLoading(false);
           return;
         }
 
         setIsVendor(true);
         setVendorId(vendor.id);
+        setAccountSummaryLoading(false);
+        setLoading(false);
         return;
       }
 
       setIsVendor(false);
       setVendorId(null);
+      setAccountSummaryLoading(false);
     } catch {
+      setScoutPoints(0);
       setIsVendor(false);
       setVendorId(null);
+      setAccountSummaryLoading(false);
     }
-  }
 
-  const isAdmin = !!email && ADMIN_EMAILS.includes(email.toLowerCase());
+    setLoading(false);
+  }
 
   async function handleLogout() {
     try {
@@ -71,29 +99,57 @@ export default function AccountScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: 40 }}
+      showsVerticalScrollIndicator={false}
+    >
       <Text style={styles.title}>Account</Text>
 
       <Text style={styles.subtitle}>
         {email ? `Signed in as ${email}` : "Browsing as a guest"}
       </Text>
 
-      {email && vendorId && (
+      {email && (
         <Pressable
-          style={styles.vendorDashboardCard}
-          onPress={() =>
+          style={[
+            styles.vendorDashboardCard,
+            !vendorId && styles.vendorDashboardCardDisabled,
+          ]}
+          onPress={() => {
+            if (!vendorId) return;
+
             router.push({
               pathname: "/vendor/dashboard",
               params: { id: vendorId },
-            })
-          }
+            });
+          }}
+          disabled={!vendorId}
         >
           <Text style={styles.vendorDashboardEyebrow}>Vendor Dashboard</Text>
-          <Text style={styles.vendorDashboardTitle}>Manage your listing</Text>
+          <Text style={styles.vendorDashboardTitle}>
+            {accountSummaryLoading ? "Loading vendor tools..." : "Manage your listing"}
+          </Text>
           <Text style={styles.vendorDashboardText}>
-            Manage your listing, analytics and content.
+            {accountSummaryLoading
+              ? "Checking your vendor access and loading your dashboard tools."
+              : "Manage your listing, analytics and content."}
           </Text>
         </Pressable>
+      )}
+
+      {email && (
+        <View style={styles.scoutCard}>
+          <Text style={styles.scoutCardEyebrow}>Scout Progress</Text>
+          <Text style={styles.scoutCardTitle}>
+            {accountSummaryLoading
+              ? "Loading scout progress..."
+              : `${scoutPoints} Scout Point${scoutPoints === 1 ? "" : "s"}`}
+          </Text>
+          <Text style={styles.scoutCardText}>
+            Earn points when vendors claim listings you originally spotted.
+          </Text>
+        </View>
       )}
 
       {!email && (
@@ -289,7 +345,7 @@ export default function AccountScreen() {
           <LogoutButton onPress={handleLogout} />
         </>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -339,14 +395,51 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 
-  vendorDashboardCard: {
+  scoutCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    marginBottom: 16,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 12,
     borderWidth: 2,
     borderColor: theme.colors.secondary,
+  },
+
+  scoutCardEyebrow: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.colors.secondary,
+    letterSpacing: 1,
+    marginBottom: 6,
+    textTransform: "uppercase",
+  },
+
+  scoutCardTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0B2A5B",
+    marginBottom: 4,
+  },
+
+  scoutCardText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#355070",
+    fontWeight: "600",
+  },
+
+  vendorDashboardCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: theme.colors.secondary,
+  },
+
+  vendorDashboardCardDisabled: {
+    opacity: 0.6,
   },
 
   vendorDashboardEyebrow: {

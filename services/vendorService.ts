@@ -23,6 +23,7 @@ type CreateVendorInput = {
   expiresAt?: string;
   isLive?: boolean;
   owner_id?: string | null;
+  spottedBy?: string | null;
   views?: number;
   directions?: number;
   rating?: number;
@@ -109,6 +110,7 @@ export async function createVendor(input: CreateVendorInput): Promise<void> {
     menu_pdf_name: input.menuPdfName ?? null,
     is_live: input.isLive ?? false,
     owner_id: input.owner_id ?? null,
+    spotted_by: input.spottedBy ?? null,
     views: input.views ?? 0,
     directions: input.directions ?? 0,
     subscription_tier: input.subscriptionTier ?? "free",
@@ -340,6 +342,80 @@ export async function adminDeleteVendor(vendorId: string) {
   });
 
   if (error) throw new Error(error.message);
+}
+
+export async function rewardScoutPointForClaim(vendorId: string): Promise<void> {
+  const { data: vendor, error: vendorError } = await supabase
+    .from("vendors")
+    .select("id, spotted_by, owner_id, rewarded_for_claim")
+    .eq("id", vendorId)
+    .maybeSingle();
+
+  if (vendorError) {
+    throw new Error(vendorError.message);
+  }
+
+  if (!vendor) return;
+
+  const spottedBy = (vendor as {
+    spotted_by?: string | null;
+    owner_id?: string | null;
+    rewarded_for_claim?: boolean | null;
+  }).spotted_by;
+
+  const ownerId = (vendor as {
+    spotted_by?: string | null;
+    owner_id?: string | null;
+    rewarded_for_claim?: boolean | null;
+  }).owner_id;
+
+  const rewardedForClaim = (vendor as {
+    spotted_by?: string | null;
+    owner_id?: string | null;
+    rewarded_for_claim?: boolean | null;
+  }).rewarded_for_claim;
+
+  if (!spottedBy) return;
+  if (!ownerId) return;
+  if (rewardedForClaim) return;
+  if (spottedBy === ownerId) return;
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("scout_points")
+    .eq("id", spottedBy)
+    .maybeSingle();
+
+  if (profileError) {
+    throw new Error(profileError.message);
+  }
+
+  const currentPoints = Number(
+    (profile as { scout_points?: number | null } | null)?.scout_points ?? 0
+  );
+
+  const { error: upsertError } = await supabase.from("profiles").upsert(
+    {
+      id: spottedBy,
+      scout_points: currentPoints + 1,
+    },
+    {
+      onConflict: "id",
+    }
+  );
+
+  if (upsertError) {
+    throw new Error(upsertError.message);
+  }
+
+  const { error: rewardFlagError } = await supabase
+    .from("vendors")
+    .update({ rewarded_for_claim: true })
+    .eq("id", vendorId);
+
+  if (rewardFlagError) {
+    throw new Error(rewardFlagError.message);
+  }
 }
 
 export async function canCountVendorInteraction(

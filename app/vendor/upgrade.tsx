@@ -1,49 +1,75 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Alert,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { supabase } from "../../lib/supabase";
-import { getCurrentUserVendor } from "../../services/authService";
+import {
+  getCurrentUser,
+  getCurrentUserVendor,
+} from "../../services/authService";
 
 export default function UpgradeScreen() {
   const [isUpdating, setIsUpdating] = useState(false);
 
-  async function handleUpgrade(nextTier: "growth" | "pro") {
+  async function startCheckout(priceId: string, tier: "growth" | "pro") {
     if (isUpdating) return;
-
     setIsUpdating(true);
 
     try {
+      const user = await getCurrentUser();
       const vendor = await getCurrentUserVendor();
 
-      if (!vendor) {
-        Alert.alert("Vendor not found", "Please create or claim a vendor listing first.");
+      if (!user || !vendor) {
+        Alert.alert(
+          "Upgrade unavailable",
+          "Please log in with your vendor account first."
+        );
         return;
       }
 
-      const { error } = await supabase
-        .from("vendors")
-        .update({ subscription_tier: nextTier })
-        .eq("id", vendor.id);
-
-      if (error) {
-        Alert.alert("Upgrade failed", error.message);
-        return;
-      }
-
-      Alert.alert(
-        "Plan updated",
-        nextTier === "growth"
-          ? "Your plan has been upgraded to Growth."
-          : "Your plan has been upgraded to Pro."
+      const { data, error } = await supabase.functions.invoke(
+        "create-checkout-session",
+        {
+          body: {
+            priceId,
+            tier,
+            userId: user.id,
+            vendorId: vendor.id,
+          },
+        }
       );
 
-      router.replace({
-        pathname: "/vendor/dashboard",
-        params: { id: vendor.id },
-      });
+      if (error) {
+        const message =
+          typeof error === "object" &&
+            error !== null &&
+            "message" in error &&
+            typeof error.message === "string"
+            ? error.message
+            : "Edge Function returned a non-2xx status code";
+
+        Alert.alert("Checkout failed", message);
+        return;
+      }
+
+      if (data?.url) {
+        await Linking.openURL(data.url);
+        return;
+      }
+
+      Alert.alert(
+        "Checkout failed",
+        data?.error ?? data?.message ?? "No checkout URL returned."
+      );
     } catch (error) {
       Alert.alert(
-        "Upgrade failed",
+        "Checkout failed",
         error instanceof Error ? error.message : "Unknown error"
       );
     } finally {
@@ -51,53 +77,89 @@ export default function UpgradeScreen() {
     }
   }
 
+  async function manageSubscription() {
+    try {
+      const vendor = await getCurrentUserVendor();
+
+      if (!vendor?.stripe_customer_id) {
+        Alert.alert(
+          "Unavailable",
+          "No active subscription found for this vendor."
+        );
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke(
+        "create-portal-session",
+        {
+          body: {
+            vendorId: vendor.id,
+          },
+        }
+      );
+
+      if (error) throw error;
+
+      if (data?.url) {
+        await Linking.openURL(data.url);
+      } else {
+        Alert.alert("Error", "No portal URL returned.");
+      }
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : "Something went wrong"
+      );
+    }
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Upgrade Your Plan</Text>
-
       <Text style={styles.subtitle}>
-        Unlock more features and grow your presence on BiteBeacon.
+        Unlock more power, visibility, and growth on BiteBeacon.
       </Text>
 
-      {/* GROWTH */}
+      {/* Growth */}
       <View style={styles.card}>
         <Text style={styles.planTitle}>Growth</Text>
         <Text style={styles.planPrice}>£9.99 / month</Text>
 
-        <Text style={styles.feature}>• Go LIVE on the map</Text>
-        <Text style={styles.feature}>• Add food categories</Text>
-        <Text style={styles.feature}>• Post updates</Text>
-
         <Pressable
           style={styles.button}
-          onPress={() => handleUpgrade("growth")}
+          onPress={() =>
+            startCheckout("price_1TGMXnPDTRLYMBotypaooxb6", "growth")
+          }
           disabled={isUpdating}
         >
           <Text style={styles.buttonText}>
-            {isUpdating ? "Updating..." : "Upgrade to Growth"}
+            {isUpdating ? "Opening..." : "Upgrade to Growth"}
           </Text>
         </Pressable>
       </View>
 
-      {/* PRO */}
+      {/* Pro */}
       <View style={styles.card}>
         <Text style={styles.planTitle}>Pro</Text>
         <Text style={styles.planPrice}>£14.99 / month</Text>
 
-        <Text style={styles.feature}>• Featured placement</Text>
-        <Text style={styles.feature}>• Maximum visibility</Text>
-        <Text style={styles.feature}>• Full feature access</Text>
-
         <Pressable
           style={styles.buttonSecondary}
-          onPress={() => handleUpgrade("pro")}
+          onPress={() =>
+            startCheckout("price_1TGMe2PDTRLYMBotJMfaW1ql", "pro")
+          }
           disabled={isUpdating}
         >
           <Text style={styles.buttonSecondaryText}>
-            {isUpdating ? "Updating..." : "Upgrade to Pro"}
+            {isUpdating ? "Opening..." : "Upgrade to Pro"}
           </Text>
         </Pressable>
       </View>
+
+      {/* Manage Subscription */}
+      <Pressable style={styles.manageButton} onPress={manageSubscription}>
+        <Text style={styles.manageButtonText}>Manage Subscription</Text>
+      </Pressable>
 
       <Pressable style={styles.backButton} onPress={() => router.back()}>
         <Text style={styles.backText}>Back</Text>
@@ -149,12 +211,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 
-  feature: {
-    fontSize: 14,
-    marginBottom: 4,
-    color: "#333",
-  },
-
   button: {
     marginTop: 10,
     backgroundColor: "#FF7A00",
@@ -178,6 +234,21 @@ const styles = StyleSheet.create({
 
   buttonSecondaryText: {
     color: "#FFFFFF",
+    fontWeight: "800",
+  },
+
+  manageButton: {
+    marginTop: 10,
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+  },
+
+  manageButtonText: {
+    color: "#0B2A5B",
     fontWeight: "800",
   },
 

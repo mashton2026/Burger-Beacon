@@ -9,16 +9,22 @@ import {
   TextInput,
 } from "react-native";
 import { theme } from "../../constants/theme";
+import { validateModeratedText } from "../../lib/contentModeration";
 import { supabase } from "../../lib/supabase";
+import { createAccountDeletionRequest } from "../../services/accountDeletionService";
 import { getCurrentUser } from "../../services/authService";
 
 export default function SecurityScreen() {
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [newEmail, setNewEmail] = useState<string>("");
   const [newPassword, setNewPassword] = useState<string>("");
   const [confirmPassword, setConfirmPassword] = useState<string>("");
+  const [deleteReason, setDeleteReason] = useState<string>("");
+  const [deleteConfirmText, setDeleteConfirmText] = useState<string>("");
   const [isUpdatingEmail, setIsUpdatingEmail] = useState<boolean>(false);
   const [isUpdatingPassword, setIsUpdatingPassword] = useState<boolean>(false);
+  const [isSubmittingDeletion, setIsSubmittingDeletion] = useState<boolean>(false);
 
   useEffect(() => {
     loadUser();
@@ -29,11 +35,13 @@ export default function SecurityScreen() {
 
     if (!user) {
       setCurrentEmail(null);
+      setCurrentUserId(null);
       setNewEmail("");
       return;
     }
 
     setCurrentEmail(user.email ?? null);
+    setCurrentUserId(user.id);
     setNewEmail(user.email ?? "");
   }
 
@@ -128,6 +136,60 @@ export default function SecurityScreen() {
     }
   }
 
+  async function handleRequestDeletion(): Promise<void> {
+    if (!currentUserId || !currentEmail) {
+      Alert.alert(
+        "No account loaded",
+        "Please log in before requesting account deletion."
+      );
+      return;
+    }
+
+    if (deleteConfirmText.trim() !== "DELETE") {
+      Alert.alert(
+        "Confirmation required",
+        'Please type DELETE exactly to confirm your request.'
+      );
+      return;
+    }
+
+    const reasonError = validateModeratedText(deleteReason, {
+      fieldLabel: "Deletion reason",
+      allowEmpty: true,
+      maxLength: 300,
+    });
+
+    if (reasonError) {
+      Alert.alert("Request blocked", reasonError);
+      return;
+    }
+
+    setIsSubmittingDeletion(true);
+
+    try {
+      await createAccountDeletionRequest({
+        userId: currentUserId,
+        email: currentEmail,
+        reason: deleteReason,
+      });
+
+      setDeleteReason("");
+      setDeleteConfirmText("");
+
+      Alert.alert(
+        "Deletion request submitted",
+        "Your request has been recorded and will be reviewed."
+      );
+    } catch (error) {
+      Alert.alert(
+        "Request failed",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    } finally {
+      setIsSubmittingDeletion(false);
+    }
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.kicker}>SECURITY</Text>
@@ -191,6 +253,47 @@ export default function SecurityScreen() {
         </Text>
       </Pressable>
 
+      <Text style={styles.dangerTitle}>Account Deletion</Text>
+      <Text style={styles.dangerText}>
+        This sends a deletion request for review. For safety, account deletion is
+        not instant inside the app.
+      </Text>
+
+      <TextInput
+        style={[styles.input, styles.deleteReasonInput]}
+        placeholder="Optional reason for deletion request"
+        placeholderTextColor="#7A7A7A"
+        multiline
+        maxLength={300}
+        value={deleteReason}
+        onChangeText={setDeleteReason}
+      />
+
+      <Text style={styles.helperText}>
+        Type DELETE below to confirm this request.
+      </Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="Type DELETE"
+        placeholderTextColor="#7A7A7A"
+        autoCapitalize="characters"
+        value={deleteConfirmText}
+        onChangeText={setDeleteConfirmText}
+      />
+
+      <Pressable
+        style={styles.deleteButton}
+        onPress={handleRequestDeletion}
+        disabled={isSubmittingDeletion}
+      >
+        <Text style={styles.deleteButtonText}>
+          {isSubmittingDeletion
+            ? "Submitting..."
+            : "Request Account Deletion"}
+        </Text>
+      </Pressable>
+
       <Pressable style={styles.backButton} onPress={() => router.back()}>
         <Text style={styles.backButtonText}>Back</Text>
       </Pressable>
@@ -227,6 +330,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "rgba(255,255,255,0.75)",
     marginBottom: 24,
+    lineHeight: 22,
   },
 
   sectionTitle: {
@@ -248,6 +352,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     marginBottom: 10,
+    color: "#222222",
+  },
+
+  deleteReasonInput: {
+    minHeight: 110,
+    textAlignVertical: "top",
   },
 
   primaryButton: {
@@ -259,6 +369,34 @@ const styles = StyleSheet.create({
   },
 
   primaryButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+  },
+
+  dangerTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#FFB3B3",
+    marginTop: 18,
+    marginBottom: 8,
+  },
+
+  dangerText: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.75)",
+    lineHeight: 21,
+    marginBottom: 12,
+  },
+
+  deleteButton: {
+    backgroundColor: "#C62828",
+    padding: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    marginBottom: 8,
+  },
+
+  deleteButtonText: {
     color: "#FFFFFF",
     fontWeight: "800",
   },

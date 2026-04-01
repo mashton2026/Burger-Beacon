@@ -30,6 +30,9 @@ type VendorRow = {
   is_suspended?: boolean | null;
   suspension_reason?: string | null;
   suspended_at?: string | null;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  subscription_status?: string | null;
 };
 
 export function mapVendorRowToVan(row: VendorRow): Van {
@@ -63,6 +66,9 @@ export function mapVendorRowToVan(row: VendorRow): Van {
     isSuspended: row.is_suspended ?? false,
     suspensionReason: row.suspension_reason ?? null,
     suspendedAt: row.suspended_at ?? null,
+    stripe_customer_id: row.stripe_customer_id ?? null,
+    stripe_subscription_id: row.stripe_subscription_id ?? null,
+    subscription_status: row.subscription_status ?? null,
   };
 }
 

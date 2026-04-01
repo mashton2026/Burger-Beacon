@@ -35,7 +35,7 @@ export async function signOutCurrentUser(): Promise<void> {
 
   if (error) {
     throw new Error(error.message);
-  } 
+  }
 }
 
 export async function getCurrentUserVendor(): Promise<Van | null> {
@@ -51,4 +51,24 @@ export async function getCurrentUserVendor(): Promise<Van | null> {
 export async function isCurrentUserVendor(): Promise<boolean> {
   const vendor = await getCurrentUserVendor();
   return !!vendor;
+}
+
+export async function getCurrentUserScoutPoints(): Promise<number> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return 0;
+  }
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("scout_points")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return Number((data as { scout_points?: number | null } | null)?.scout_points ?? 0);
 }

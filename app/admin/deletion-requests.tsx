@@ -1,0 +1,322 @@
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
+import {
+    Alert,
+    FlatList,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
+import { theme } from "../../constants/theme";
+import {
+    getAllAccountDeletionRequests,
+    updateAccountDeletionRequestStatus,
+    type AccountDeletionRequest,
+} from "../../services/accountDeletionService";
+
+export default function AdminDeletionRequestsScreen() {
+    const [requests, setRequests] = useState<AccountDeletionRequest[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [processingId, setProcessingId] = useState<string | null>(null);
+
+    useFocusEffect(
+        useCallback(() => {
+            loadRequests();
+        }, [])
+    );
+
+    async function loadRequests() {
+        setLoading(true);
+
+        try {
+            const data = await getAllAccountDeletionRequests();
+            setRequests(data);
+        } catch (error) {
+            Alert.alert(
+                "Load failed",
+                error instanceof Error ? error.message : "Unknown error"
+            );
+            setRequests([]);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function handleApprove(requestId: string) {
+        if (processingId) return;
+
+        setProcessingId(requestId);
+
+        try {
+            await updateAccountDeletionRequestStatus({
+                requestId,
+                status: "approved",
+            });
+
+            Alert.alert("Success", "Deletion request approved.");
+            await loadRequests();
+        } catch (error) {
+            Alert.alert(
+                "Update failed",
+                error instanceof Error ? error.message : "Unknown error"
+            );
+        } finally {
+            setProcessingId(null);
+        }
+    }
+
+    async function handleReject(requestId: string) {
+        if (processingId) return;
+
+        setProcessingId(requestId);
+
+        try {
+            await updateAccountDeletionRequestStatus({
+                requestId,
+                status: "rejected",
+            });
+
+            Alert.alert("Success", "Deletion request rejected.");
+            await loadRequests();
+        } catch (error) {
+            Alert.alert(
+                "Update failed",
+                error instanceof Error ? error.message : "Unknown error"
+            );
+        } finally {
+            setProcessingId(null);
+        }
+    }
+
+    function renderItem({ item }: { item: AccountDeletionRequest }) {
+        const isProcessing = processingId === item.id;
+        const isAnyProcessing = processingId !== null;
+
+        return (
+            <View style={styles.card}>
+                <Text style={styles.cardTitle}>
+                    {item.email ?? "Unknown account"}
+                </Text>
+
+                <Text style={styles.meta}>User ID: {item.user_id}</Text>
+                <Text style={styles.meta}>
+                    Vendor ID: {item.vendor_id ?? "No linked vendor"}
+                </Text>
+                <Text style={styles.meta}>
+                    Requested: {new Date(item.created_at).toLocaleString()}
+                </Text>
+
+                <Text style={styles.reasonLabel}>Reason</Text>
+                <Text style={styles.reasonText}>
+                    {item.reason?.trim() || "No reason provided."}
+                </Text>
+
+                <View style={styles.actionsRow}>
+                    <Pressable
+                        style={[
+                            styles.actionButton,
+                            styles.approveButton,
+                            isAnyProcessing && !isProcessing && styles.buttonDisabled,
+                        ]}
+                        onPress={() =>
+                            Alert.alert(
+                                "Approve deletion request?",
+                                "This will mark the request as approved.",
+                                [
+                                    { text: "Cancel", style: "cancel" },
+                                    {
+                                        text: "Approve",
+                                        onPress: () => handleApprove(item.id),
+                                    },
+                                ]
+                            )
+                        }
+                        disabled={isAnyProcessing}
+                    >
+                        <Text style={styles.actionButtonText}>
+                            {isProcessing ? "Working..." : "Approve"}
+                        </Text>
+                    </Pressable>
+
+                    <Pressable
+                        style={[
+                            styles.actionButton,
+                            styles.rejectButton,
+                            isAnyProcessing && !isProcessing && styles.buttonDisabled,
+                        ]}
+                        onPress={() =>
+                            Alert.alert(
+                                "Reject deletion request?",
+                                "This will mark the request as rejected.",
+                                [
+                                    { text: "Cancel", style: "cancel" },
+                                    {
+                                        text: "Reject",
+                                        style: "destructive",
+                                        onPress: () => handleReject(item.id),
+                                    },
+                                ]
+                            )
+                        }
+                        disabled={isAnyProcessing}
+                    >
+                        <Text style={styles.actionButtonText}>Reject</Text>
+                    </Pressable>
+                </View>
+            </View>
+        );
+    }
+
+    return (
+        <View style={styles.container}>
+            <Text style={styles.kicker}>ADMIN</Text>
+            <Text style={styles.title}>Deletion Requests</Text>
+            <Text style={styles.subtitle}>
+                Review account deletion requests submitted by users and vendors.
+            </Text>
+
+            {loading ? (
+                <Text style={styles.helperText}>Loading deletion requests...</Text>
+            ) : (
+                <FlatList
+                    data={requests}
+                    keyExtractor={(item) => item.id}
+                    renderItem={renderItem}
+                    contentContainerStyle={styles.listContent}
+                    ListEmptyComponent={
+                        <Text style={styles.helperText}>
+                            No deletion requests waiting for review.
+                        </Text>
+                    }
+                />
+            )}
+
+            <Pressable style={styles.backButton} onPress={() => router.back()}>
+                <Text style={styles.backButtonText}>Back</Text>
+            </Pressable>
+        </View>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: theme.colors.background,
+        padding: 24,
+    },
+
+    kicker: {
+        fontSize: 12,
+        fontWeight: "800",
+        color: theme.colors.secondary,
+        letterSpacing: 1.2,
+        marginBottom: 8,
+    },
+
+    title: {
+        fontSize: 30,
+        fontWeight: "800",
+        color: "#FFFFFF",
+        marginBottom: 8,
+    },
+
+    subtitle: {
+        fontSize: 15,
+        color: "rgba(255,255,255,0.75)",
+        lineHeight: 22,
+        marginBottom: 20,
+    },
+
+    helperText: {
+        fontSize: 15,
+        color: "rgba(255,255,255,0.75)",
+        lineHeight: 22,
+        marginBottom: 20,
+    },
+
+    listContent: {
+        paddingBottom: 20,
+    },
+
+    card: {
+        backgroundColor: "#FFFFFF",
+        borderRadius: 18,
+        padding: 16,
+        marginBottom: 14,
+        borderWidth: 2,
+        borderColor: theme.colors.border,
+    },
+
+    cardTitle: {
+        fontSize: 18,
+        fontWeight: "800",
+        color: "#0B2A5B",
+        marginBottom: 8,
+    },
+
+    meta: {
+        fontSize: 14,
+        color: "#444444",
+        marginBottom: 4,
+    },
+
+    reasonLabel: {
+        fontSize: 13,
+        fontWeight: "800",
+        color: "#FF7A00",
+        marginTop: 10,
+        marginBottom: 6,
+        letterSpacing: 0.5,
+    },
+
+    reasonText: {
+        fontSize: 14,
+        color: "#222222",
+        lineHeight: 20,
+        marginBottom: 12,
+    },
+
+    actionsRow: {
+        flexDirection: "row",
+        gap: 10,
+    },
+
+    actionButton: {
+        flex: 1,
+        paddingVertical: 14,
+        borderRadius: 14,
+        alignItems: "center",
+    },
+
+    approveButton: {
+        backgroundColor: "#1DB954",
+    },
+
+    rejectButton: {
+        backgroundColor: "#C62828",
+    },
+
+    actionButtonText: {
+        color: "#FFFFFF",
+        fontWeight: "800",
+    },
+
+    buttonDisabled: {
+        opacity: 0.5,
+    },
+
+    backButton: {
+        backgroundColor: "#D9D9D9",
+        paddingVertical: 14,
+        borderRadius: 16,
+        alignItems: "center",
+        marginTop: 8,
+    },
+
+    backButtonText: {
+        color: "#222222",
+        fontSize: 16,
+        fontWeight: "700",
+    },
+});

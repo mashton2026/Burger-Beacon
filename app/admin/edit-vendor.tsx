@@ -12,7 +12,6 @@ import {
 } from "react-native";
 import {
     adminDeleteVendor,
-    adminDeleteVendorPhotoFromStorage,
     adminRemoveVendorPhoto,
     adminUpdateVendor,
     getVendorById,
@@ -29,7 +28,9 @@ export default function EditVendorScreen() {
     const [cuisine, setCuisine] = useState("");
     const [menu, setMenu] = useState("");
     const [schedule, setSchedule] = useState("");
-    const [subscriptionTier, setSubscriptionTier] = useState<"free" | "growth" | "pro">("free");
+    const [subscriptionTier, setSubscriptionTier] = useState<
+        "free" | "growth" | "pro"
+    >("free");
     const [isLive, setIsLive] = useState(false);
 
     useEffect(() => {
@@ -82,7 +83,7 @@ export default function EditVendorScreen() {
     if (!vendor) {
         return (
             <View style={styles.center}>
-                <Text style={{ color: "#fff" }}>Loading...</Text>
+                <Text style={styles.loadingText}>Loading...</Text>
             </View>
         );
     }
@@ -91,25 +92,19 @@ export default function EditVendorScreen() {
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <Text style={styles.title}>Edit Vendor</Text>
 
-            {/* PHOTOS SECTION */}
             {vendor.photos && vendor.photos.length > 0 ? (
-                <View style={{ marginBottom: 20 }}>
-                    <Text style={{ color: "#fff", fontWeight: "800", marginBottom: 10 }}>
-                        Photos
-                    </Text>
+                <View style={styles.photosSection}>
+                    <Text style={styles.photosTitle}>Photos</Text>
 
                     {(vendor.photos ?? []).map((photoUri, index) => (
-                        <View key={`${photoUri}-${index}`} style={{ marginBottom: 10 }}>
-                            <Image
-                                source={{ uri: photoUri }}
-                                style={{ width: "100%", height: 180, borderRadius: 12 }}
-                            />
+                        <View key={`${photoUri}-${index}`} style={styles.photoCard}>
+                            <Image source={{ uri: photoUri }} style={styles.photoImage} />
 
                             <Pressable
                                 onPress={async () => {
                                     try {
                                         await adminRemoveVendorPhoto(vendor.id, photoUri);
-                                        await adminDeleteVendorPhotoFromStorage(photoUri);
+
                                         setVendor((prev) =>
                                             prev
                                                 ? {
@@ -138,6 +133,7 @@ export default function EditVendorScreen() {
                 value={name}
                 onChangeText={setName}
                 placeholder="Name"
+                placeholderTextColor="#7A7A7A"
             />
 
             <TextInput
@@ -145,6 +141,7 @@ export default function EditVendorScreen() {
                 value={vendorName}
                 onChangeText={setVendorName}
                 placeholder="Vendor Name"
+                placeholderTextColor="#7A7A7A"
             />
 
             <TextInput
@@ -152,6 +149,7 @@ export default function EditVendorScreen() {
                 value={cuisine}
                 onChangeText={setCuisine}
                 placeholder="Cuisine"
+                placeholderTextColor="#7A7A7A"
             />
 
             <TextInput
@@ -159,6 +157,7 @@ export default function EditVendorScreen() {
                 value={menu}
                 onChangeText={setMenu}
                 placeholder="Menu"
+                placeholderTextColor="#7A7A7A"
             />
 
             <TextInput
@@ -166,6 +165,7 @@ export default function EditVendorScreen() {
                 value={schedule}
                 onChangeText={setSchedule}
                 placeholder="Schedule"
+                placeholderTextColor="#7A7A7A"
             />
 
             <Text style={styles.fieldLabel}>Subscription Tier</Text>
@@ -198,9 +198,7 @@ export default function EditVendorScreen() {
                 style={[styles.liveToggle, isLive && styles.liveToggleActive]}
                 onPress={() => setIsLive((current) => !current)}
             >
-                <Text style={styles.liveToggleText}>
-                    {isLive ? "LIVE" : "OFFLINE"}
-                </Text>
+                <Text style={styles.liveToggleText}>{isLive ? "LIVE" : "OFFLINE"}</Text>
             </Pressable>
 
             <Pressable style={styles.button} onPress={handleSave}>
@@ -246,15 +244,19 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "#0B2A5B",
     },
+
     content: {
         padding: 20,
+        paddingBottom: 40,
     },
+
     title: {
         fontSize: 24,
         fontWeight: "800",
         color: "#fff",
         marginBottom: 20,
     },
+
     input: {
         backgroundColor: "#FFFFFF",
         borderRadius: 14,
@@ -262,17 +264,21 @@ const styles = StyleSheet.create({
         marginBottom: 12,
         borderWidth: 2,
         borderColor: "#FF7A00",
+        color: "#222222",
     },
+
     button: {
         backgroundColor: "#FF7A00",
         padding: 14,
         borderRadius: 12,
         alignItems: "center",
     },
+
     buttonText: {
         color: "#fff",
         fontWeight: "800",
     },
+
     removeButton: {
         marginTop: 6,
         backgroundColor: "#C62828",
@@ -280,15 +286,21 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         alignItems: "center",
     },
+
     removeButtonText: {
         color: "#fff",
         fontWeight: "700",
     },
+
     center: {
         flex: 1,
         justifyContent: "center",
         alignItems: "center",
         backgroundColor: "#0B2A5B",
+    },
+
+    loadingText: {
+        color: "#fff",
     },
 
     deleteButton: {
@@ -355,5 +367,25 @@ const styles = StyleSheet.create({
     liveToggleText: {
         color: "#FFFFFF",
         fontWeight: "800",
+    },
+
+    photosSection: {
+        marginBottom: 20,
+    },
+
+    photosTitle: {
+        color: "#fff",
+        fontWeight: "800",
+        marginBottom: 10,
+    },
+
+    photoCard: {
+        marginBottom: 10,
+    },
+
+    photoImage: {
+        width: "100%",
+        height: 180,
+        borderRadius: 12,
     },
 });

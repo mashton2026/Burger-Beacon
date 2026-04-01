@@ -8,16 +8,16 @@ import {
   View,
 } from "react-native";
 import { theme } from "../../constants/theme";
+import { isCurrentUserAdmin } from "../../services/adminService";
 import { getCurrentUser } from "../../services/authService";
 import { getAllVendors } from "../../services/vendorService";
 import { type Van } from "../../types/van";
-
-const ADMIN_EMAILS = ["m.l.ashton2024@gmail.com"];
 
 export default function AdminPanelScreen() {
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
   const [vendors, setVendors] = useState<Van[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -32,17 +32,18 @@ export default function AdminPanelScreen() {
       const user = await getCurrentUser();
       setCurrentEmail(user?.email ?? null);
 
+      const adminStatus = await isCurrentUserAdmin();
+      setIsAdmin(adminStatus);
+
       const allVendors = await getAllVendors();
       setVendors(allVendors);
     } catch {
       setVendors([]);
+      setIsAdmin(false);
     } finally {
       setIsLoading(false);
     }
   }
-
-  const isAdmin =
-    !!currentEmail && ADMIN_EMAILS.includes(currentEmail.toLowerCase());
 
   const totalVendors = vendors.length;
   const liveVendors = vendors.filter((vendor) => vendor.isLive).length;
@@ -67,7 +68,6 @@ export default function AdminPanelScreen() {
         <Text style={styles.subtitle}>
           This area is only available to BiteBeacon admin accounts.
         </Text>
-
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Back</Text>
         </Pressable>
@@ -86,6 +86,10 @@ export default function AdminPanelScreen() {
       <Text style={styles.subtitle}>
         Monitor vendors, claims, moderation, and subscription control from one
         place.
+      </Text>
+
+      <Text style={styles.helperText}>
+        {currentEmail ? `Signed in as ${currentEmail}` : "Checking admin session..."}
       </Text>
 
       <Text style={styles.sectionTitle}>Platform Summary</Text>
@@ -164,6 +168,26 @@ export default function AdminPanelScreen() {
         </Text>
       </Pressable>
 
+      <Pressable
+        style={styles.row}
+        onPress={() => router.push("/admin/reports")}
+      >
+        <Text style={styles.rowTitle}>Review Reports</Text>
+        <Text style={styles.rowText}>
+          Review user-submitted listing reports and take moderation action.
+        </Text>
+      </Pressable>
+
+      <Pressable
+        style={styles.row}
+        onPress={() => router.push("/admin/deletion-requests")}
+      >
+        <Text style={styles.rowTitle}>Review Deletion Requests</Text>
+        <Text style={styles.rowText}>
+          Review account deletion requests submitted by users and vendors.
+        </Text>
+      </Pressable>
+
       <Pressable style={styles.backButton} onPress={() => router.back()}>
         <Text style={styles.backButtonText}>Back</Text>
       </Pressable>
@@ -201,6 +225,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "rgba(255,255,255,0.75)",
     lineHeight: 22,
+    marginBottom: 12,
+  },
+
+  helperText: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.6)",
     marginBottom: 24,
   },
 

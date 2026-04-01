@@ -20,7 +20,9 @@ export default function AdminSubscriptionsScreen() {
     const [vendors, setVendors] = useState<Van[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
-    const [processingVendorId, setProcessingVendorId] = useState<string | null>(null);
+    const [processingVendorId, setProcessingVendorId] = useState<string | null>(
+        null
+    );
 
     useFocusEffect(
         useCallback(() => {
@@ -63,20 +65,49 @@ export default function AdminSubscriptionsScreen() {
         vendorId: string,
         nextTier: "free" | "growth" | "pro"
     ) {
-        setProcessingVendorId(vendorId);
+        const vendor = vendors.find((v) => v.id === vendorId);
+        const currentTier = vendor?.subscriptionTier ?? "free";
 
-        try {
-            await updateVendorSubscriptionTier(vendorId, nextTier);
-            Alert.alert("Plan updated", `Vendor moved to ${nextTier.toUpperCase()}.`);
-            await loadVendors();
-        } catch (error) {
-            Alert.alert(
-                "Update failed",
-                error instanceof Error ? error.message : "Unknown error"
-            );
-        } finally {
-            setProcessingVendorId(null);
-        }
+        if (currentTier === nextTier) return;
+
+        const isDowngrade =
+            (currentTier === "pro" && (nextTier === "growth" || nextTier === "free")) ||
+            (currentTier === "growth" && nextTier === "free");
+
+        const confirmMessage = isDowngrade
+            ? `Move this vendor from ${currentTier.toUpperCase()} to ${nextTier.toUpperCase()}?\n\nThis may reduce vendor visibility and disable paid features.`
+            : `Move this vendor from ${currentTier.toUpperCase()} to ${nextTier.toUpperCase()}?`;
+
+        Alert.alert(
+            "Confirm tier change",
+            confirmMessage,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Confirm",
+                    style: "destructive",
+                    onPress: async () => {
+                        setProcessingVendorId(vendorId);
+
+                        try {
+                            await updateVendorSubscriptionTier(vendorId, nextTier);
+                            Alert.alert(
+                                "Plan updated",
+                                `Vendor moved to ${nextTier.toUpperCase()}.`
+                            );
+                            await loadVendors();
+                        } catch (error) {
+                            Alert.alert(
+                                "Update failed",
+                                error instanceof Error ? error.message : "Unknown error"
+                            );
+                        } finally {
+                            setProcessingVendorId(null);
+                        }
+                    },
+                },
+            ]
+        );
     }
 
     function renderVendor({ item }: { item: Van }) {

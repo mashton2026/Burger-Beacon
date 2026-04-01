@@ -30,4 +30,7 @@ export type Van = {
   isSuspended?: boolean;
   suspensionReason?: string | null;
   suspendedAt?: string | null;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  subscription_status?: string | null;
 };
