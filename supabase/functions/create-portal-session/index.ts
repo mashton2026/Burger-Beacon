@@ -14,36 +14,15 @@ Deno.serve(async (req) => {
     }
 
     try {
-        console.log("Incoming portal session request");
         const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY");
-
-        if (!stripeSecret) {
-            throw new Error("Missing STRIPE_SECRET_KEY");
-        }
-
-        const stripe = new Stripe(stripeSecret, {
-            apiVersion: "2023-10-16",
-        });
-
         const supabaseUrl = Deno.env.get("SUPABASE_URL");
         const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-        if (!supabaseUrl || !supabaseServiceRoleKey) {
-            throw new Error("Missing Supabase environment variables");
-        }
-
-        const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
-
-        const body = await req.json();
-        console.log("Request body:", body);
-
-        const { vendorId } = body;
-
-        if (!vendorId) {
+        if (!stripeSecret || !supabaseUrl || !supabaseServiceRoleKey) {
             return new Response(
-                JSON.stringify({ error: "Missing vendorId" }),
+                JSON.stringify({ error: "Missing environment variables" }),
                 {
-                    status: 400,
+                    status: 500,
                     headers: {
                         ...corsHeaders,
                         "Content-Type": "application/json",
@@ -52,19 +31,90 @@ Deno.serve(async (req) => {
             );
         }
 
-        const { data: vendor, error: vendorError } = await supabase
-            .from("vendors")
-            .select("stripe_customer_id")
-            .eq("id", vendorId)
-            .maybeSingle();
+        const stripe = new Stripe(stripeSecret, {
+            apiVersion: "2023-10-16",
+        });
 
-        console.log("Vendor fetch result:", vendor, vendorError);
-
-        if (vendorError) {
-            throw new Error(vendorError.message);
+        const authHeader = req.headers.get("Authorization");
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return new Response(JSON.stringify({ error: "Unauthorized" }), {
+                status: 401,
+                headers: {
+                    ...corsHeaders,
+                    "Content-Type": "application/json",
+                },
+            });
         }
 
-        if (!vendor?.stripe_customer_id) {
+        const userClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
+            global: {
+                headers: {
+                    Authorization: authHeader,
+                },
+            },
+        });
+
+        const {
+            data: { user },
+            error: userError,
+        } = await userClient.auth.getUser();
+
+        if (userError || !user) {
+            return new Response(JSON.stringify({ error: "Invalid user" }), {
+                status: 401,
+                headers: {
+                    ...corsHeaders,
+                    "Content-Type": "application/json",
+                },
+            });
+        }
+
+        const body = await req.json();
+        const { vendorId } = body;
+
+        if (!vendorId) {
+            return new Response(JSON.stringify({ error: "Missing vendorId" }), {
+                status: 400,
+                headers: {
+                    ...corsHeaders,
+                    "Content-Type": "application/json",
+                },
+            });
+        }
+
+        const serviceClient = createClient(supabaseUrl, supabaseServiceRoleKey);
+
+        const { data: vendor, error: vendorError } = await serviceClient
+            .from("vendors")
+            .select("id, owner_id, stripe_customer_id")
+            .eq("id", vendorId)
+            .eq("owner_id", user.id)
+            .maybeSingle();
+
+        if (vendorError) {
+            return new Response(JSON.stringify({ error: vendorError.message }), {
+                status: 500,
+                headers: {
+                    ...corsHeaders,
+                    "Content-Type": "application/json",
+                },
+            });
+        }
+
+        if (!vendor) {
+            return new Response(
+                JSON.stringify({ error: "Unauthorized vendor access" }),
+                {
+                    status: 403,
+                    headers: {
+                        ...corsHeaders,
+                        "Content-Type": "application/json",
+                    },
+                }
+            );
+        }
+
+        if (!vendor.stripe_customer_id) {
             return new Response(
                 JSON.stringify({ error: "No Stripe customer found for this vendor" }),
                 {
@@ -91,6 +141,7 @@ Deno.serve(async (req) => {
         });
     } catch (error) {
         console.error("Portal session error:", error);
+
         return new Response(
             JSON.stringify({
                 error: error instanceof Error ? error.message : "Unknown error",

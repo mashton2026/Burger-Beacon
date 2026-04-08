@@ -1,16 +1,17 @@
+type SubscriptionTier = "free" | "growth" | "pro" | null | undefined;
+type RequiredTier = "growth" | "pro";
+
 export function hasFeatureAccess(
-  tier: "free" | "growth" | "pro" | null,
-  required: "growth" | "pro"
-) {
-  if (!tier) return false;
+  tier: SubscriptionTier,
+  required: RequiredTier
+): boolean {
+  if (!tier) {
+    return false;
+  }
 
   if (required === "growth") {
     return tier === "growth" || tier === "pro";
   }
 
-  if (required === "pro") {
-    return tier === "pro";
-  }
-
-  return false;
+  return tier === "pro";
 }

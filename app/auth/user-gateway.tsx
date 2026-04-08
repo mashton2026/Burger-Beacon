@@ -8,6 +8,8 @@ export default function UserGatewayScreen() {
   const [isContinuingAsGuest, setIsContinuingAsGuest] = useState(false);
 
   async function handleContinueAsGuest() {
+    if (isContinuingAsGuest) return;
+
     setIsContinuingAsGuest(true);
 
     try {
@@ -19,6 +21,11 @@ export default function UserGatewayScreen() {
       }
 
       router.replace("/(tabs)");
+    } catch (error) {
+      Alert.alert(
+        "Guest mode failed",
+        error instanceof Error ? error.message : "Unknown error"
+      );
     } finally {
       setIsContinuingAsGuest(false);
     }
@@ -43,21 +50,32 @@ export default function UserGatewayScreen() {
         </Text>
 
         <Pressable
-          style={styles.primaryButton}
+          style={[
+            styles.primaryButton,
+            isContinuingAsGuest && styles.buttonDisabled,
+          ]}
           onPress={() => router.push("/auth/user-login")}
+          disabled={isContinuingAsGuest}
         >
           <Text style={styles.primaryButtonText}>Login</Text>
         </Pressable>
 
         <Pressable
-          style={styles.secondaryButton}
+          style={[
+            styles.secondaryButton,
+            isContinuingAsGuest && styles.buttonDisabled,
+          ]}
           onPress={() => router.push("/auth/user-signup")}
+          disabled={isContinuingAsGuest}
         >
           <Text style={styles.secondaryButtonText}>Create Account</Text>
         </Pressable>
 
         <Pressable
-          style={styles.guestButton}
+          style={[
+            styles.guestButton,
+            isContinuingAsGuest && styles.buttonDisabled,
+          ]}
           onPress={handleContinueAsGuest}
           disabled={isContinuingAsGuest}
         >
@@ -77,11 +95,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
   },
-
   heroBlock: {
     marginBottom: 24,
   },
-
   kicker: {
     fontSize: 12,
     fontWeight: "800",
@@ -89,20 +105,17 @@ const styles = StyleSheet.create({
     color: theme.colors.secondary,
     marginBottom: 8,
   },
-
   title: {
     fontSize: 34,
     fontWeight: "800",
     color: theme.colors.textOnDark,
     marginBottom: 8,
   },
-
   subtitle: {
     fontSize: 15,
     lineHeight: 22,
     color: "rgba(255,255,255,0.78)",
   },
-
   card: {
     backgroundColor: theme.colors.card,
     borderRadius: 24,
@@ -115,21 +128,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 4,
   },
-
   cardTitle: {
     fontSize: 22,
     fontWeight: "800",
     color: theme.colors.background,
     marginBottom: 8,
   },
-
   cardText: {
     fontSize: 15,
     lineHeight: 22,
     color: theme.colors.muted,
     marginBottom: 18,
   },
-
   primaryButton: {
     backgroundColor: theme.colors.background,
     paddingVertical: 15,
@@ -137,13 +147,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
-
   primaryButtonText: {
     color: theme.colors.textOnDark,
     fontSize: 16,
     fontWeight: "800",
   },
-
   secondaryButton: {
     backgroundColor: theme.colors.primary,
     paddingVertical: 15,
@@ -151,23 +159,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
-
   secondaryButtonText: {
     color: theme.colors.textOnDark,
     fontSize: 16,
     fontWeight: "800",
   },
-
   guestButton: {
     backgroundColor: "#D9D9D9",
     paddingVertical: 15,
     borderRadius: 16,
     alignItems: "center",
   },
-
   guestButtonText: {
     color: "#222222",
     fontSize: 16,
     fontWeight: "700",
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });

@@ -1,6 +1,13 @@
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { theme } from "../../constants/theme";
 import { isCurrentUserAdmin } from "../../services/adminService";
 import {
@@ -29,43 +36,32 @@ export default function AccountScreen() {
     setLoading(true);
     setAccountSummaryLoading(true);
 
-    const user = await getCurrentUser();
-
-    if (!user) {
-      setEmail(null);
-      setIsVendor(false);
-      setVendorId(null);
-      setScoutPoints(0);
-      setAccountSummaryLoading(false);
-      setLoading(false);
-      setIsAdmin(false);
-      return;
-    }
-
-    setEmail(user.email ?? null);
     try {
-      const adminStatus = await isCurrentUserAdmin();
-      setIsAdmin(adminStatus);
-    } catch {
-      setIsAdmin(false);
-    }
+      const user = await getCurrentUser();
 
-    try {
-      const [points, vendor] = await Promise.all([
-        getCurrentUserScoutPoints(),
-        getCurrentUserVendor(),
+      if (!user) {
+        setEmail(null);
+        setIsVendor(false);
+        setVendorId(null);
+        setScoutPoints(0);
+        setIsAdmin(false);
+        setAccountSummaryLoading(false);
+        setLoading(false);
+        return;
+      }
+
+      setEmail(user.email ?? null);
+
+      const [adminStatus, points, vendor] = await Promise.all([
+        isCurrentUserAdmin().catch(() => false),
+        getCurrentUserScoutPoints().catch(() => 0),
+        getCurrentUserVendor().catch(() => null),
       ]);
 
+      setIsAdmin(adminStatus);
       setScoutPoints(points);
 
-      if (vendor) {
-        if (vendor.isSuspended) {
-          setIsVendor(false);
-          setVendorId(null);
-          setLoading(false);
-          return;
-        }
-
+      if (vendor && !vendor.isSuspended) {
         setIsVendor(true);
         setVendorId(vendor.id);
         setAccountSummaryLoading(false);
@@ -76,14 +72,16 @@ export default function AccountScreen() {
       setIsVendor(false);
       setVendorId(null);
       setAccountSummaryLoading(false);
+      setLoading(false);
     } catch {
-      setScoutPoints(0);
+      setEmail(null);
       setIsVendor(false);
       setVendorId(null);
+      setScoutPoints(0);
+      setIsAdmin(false);
       setAccountSummaryLoading(false);
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   async function handleLogout() {
@@ -98,6 +96,22 @@ export default function AccountScreen() {
     }
   }
 
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.title}>Account</Text>
+        <Text style={styles.subtitle}>Loading your account...</Text>
+
+        <View style={styles.loadingCard}>
+          <Text style={styles.loadingCardTitle}>Please wait</Text>
+          <Text style={styles.loadingCardText}>
+            We are checking your account, vendor access, and scout progress.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       style={styles.container}
@@ -105,7 +119,6 @@ export default function AccountScreen() {
       showsVerticalScrollIndicator={false}
     >
       <Text style={styles.title}>Account</Text>
-
       <Text style={styles.subtitle}>
         {email ? `Signed in as ${email}` : "Browsing as a guest"}
       </Text>
@@ -118,7 +131,6 @@ export default function AccountScreen() {
           ]}
           onPress={() => {
             if (!vendorId) return;
-
             router.push({
               pathname: "/vendor/dashboard",
               params: { id: vendorId },
@@ -155,36 +167,30 @@ export default function AccountScreen() {
       {!email && (
         <>
           <Section title="Get Started" />
-
           <Row
             label="User Login"
             onPress={() => router.push("/auth/user-login")}
           />
-
           <Row
             label="Create Account"
             onPress={() => router.push("/auth/user-signup")}
           />
-
           <Row
             label="Vendor Portal"
             onPress={() => router.push("/auth/login")}
           />
 
           <Section title="Help & Support" />
-
           <Row
             label="Contact BiteBeacon Support"
             onPress={() => router.push("/account/help")}
           />
 
           <Section title="Legal" />
-
           <Row
             label="Terms & Conditions"
             onPress={() => router.push("/account/terms")}
           />
-
           <Row
             label="Privacy Policy"
             onPress={() => router.push("/account/privacy")}
@@ -195,38 +201,32 @@ export default function AccountScreen() {
       {email && !isVendor && !isAdmin && (
         <>
           <Section title="Your Activity" />
-
           <Row
             label="Favourites"
             onPress={() => router.push("/(tabs)/favourites")}
           />
-
           <Row
             label="Explore Map"
             onPress={() => router.push("/(tabs)/explore")}
           />
 
           <Section title="Security" />
-
           <Row
             label="Account Settings"
             onPress={() => router.push("/account/security")}
           />
 
           <Section title="Help & Support" />
-
           <Row
             label="Contact BiteBeacon Support"
             onPress={() => router.push("/account/help")}
           />
 
           <Section title="Legal" />
-
           <Row
             label="Terms & Conditions"
             onPress={() => router.push("/account/terms")}
           />
-
           <Row
             label="Privacy Policy"
             onPress={() => router.push("/account/privacy")}
@@ -239,7 +239,6 @@ export default function AccountScreen() {
       {email && isVendor && !isAdmin && (
         <>
           <Section title="Vendor Tools" />
-
           {vendorId && (
             <Row
               label="Dashboard"
@@ -251,7 +250,6 @@ export default function AccountScreen() {
               }
             />
           )}
-
           {vendorId && (
             <Row
               label="View Listing"
@@ -265,26 +263,22 @@ export default function AccountScreen() {
           )}
 
           <Section title="Security" />
-
           <Row
             label="Account Settings"
             onPress={() => router.push("/account/security")}
           />
 
           <Section title="Help & Support" />
-
           <Row
             label="Contact BiteBeacon Support"
             onPress={() => router.push("/account/help")}
           />
 
           <Section title="Legal" />
-
           <Row
             label="Terms & Conditions"
             onPress={() => router.push("/account/terms")}
           />
-
           <Row
             label="Privacy Policy"
             onPress={() => router.push("/account/privacy")}
@@ -328,11 +322,13 @@ export default function AccountScreen() {
             label="Account Settings"
             onPress={() => router.push("/account/security")}
           />
+
           <Section title="Help & Support" />
           <Row
             label="Contact BiteBeacon Support"
             onPress={() => router.push("/account/help")}
           />
+
           <Section title="Legal" />
           <Row
             label="Terms & Conditions"
@@ -342,6 +338,7 @@ export default function AccountScreen() {
             label="Privacy Policy"
             onPress={() => router.push("/account/privacy")}
           />
+
           <LogoutButton onPress={handleLogout} />
         </>
       )}
@@ -381,20 +378,42 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
     padding: 24,
   },
-
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+    padding: 24,
+  },
   title: {
     fontSize: 30,
     fontWeight: "800",
     color: "#FFFFFF",
     marginBottom: 8,
   },
-
   subtitle: {
     fontSize: 15,
     color: "rgba(255,255,255,0.7)",
     marginBottom: 20,
   },
-
+  loadingCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderWidth: 2,
+    borderColor: theme.colors.secondary,
+  },
+  loadingCardTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0B2A5B",
+    marginBottom: 6,
+  },
+  loadingCardText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#355070",
+    fontWeight: "600",
+  },
   scoutCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
@@ -404,7 +423,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: theme.colors.secondary,
   },
-
   scoutCardEyebrow: {
     fontSize: 12,
     fontWeight: "800",
@@ -413,21 +431,18 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textTransform: "uppercase",
   },
-
   scoutCardTitle: {
     fontSize: 18,
     fontWeight: "800",
     color: "#0B2A5B",
     marginBottom: 4,
   },
-
   scoutCardText: {
     fontSize: 13,
     lineHeight: 18,
     color: "#355070",
     fontWeight: "600",
   },
-
   vendorDashboardCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
@@ -437,11 +452,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: theme.colors.secondary,
   },
-
   vendorDashboardCardDisabled: {
     opacity: 0.6,
   },
-
   vendorDashboardEyebrow: {
     fontSize: 12,
     fontWeight: "800",
@@ -450,21 +463,18 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textTransform: "uppercase",
   },
-
   vendorDashboardTitle: {
     fontSize: 18,
     fontWeight: "800",
     color: "#0B2A5B",
     marginBottom: 4,
   },
-
   vendorDashboardText: {
     fontSize: 13,
     lineHeight: 18,
     color: "#355070",
     fontWeight: "600",
   },
-
   section: {
     fontSize: 12,
     fontWeight: "800",
@@ -473,19 +483,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     letterSpacing: 1,
   },
-
   row: {
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.08)",
   },
-
   rowText: {
     fontSize: 16,
     color: "#FFFFFF",
     fontWeight: "600",
   },
-
   logoutButton: {
     marginTop: 24,
     backgroundColor: "#C62828",
@@ -493,7 +500,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
   },
-
   logoutText: {
     color: "#FFFFFF",
     fontWeight: "700",

@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -140,10 +141,11 @@ function matchesSearchQuery(van: Van, query: string) {
 
 export default function MapScreen() {
   const params = useLocalSearchParams();
-  const mapRef = useRef<MapView | null>(null);
+  const mapRef = useRef<any>(null);
   const hasAnimatedToUserLocation = useRef(false);
 
   const [spotVisible, setSpotVisible] = useState(false);
+  const [showMapHint, setShowMapHint] = useState(false);
   const [spotMode, setSpotMode] = useState(false);
   const [spotName, setSpotName] = useState("");
   const [spotCuisine, setSpotCuisine] = useState("");
@@ -155,6 +157,7 @@ export default function MapScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [userRegion, setUserRegion] = useState<Region>(DEFAULT_REGION);
   const [legendOpen, setLegendOpen] = useState(false);
+  const [vendorsLoading, setVendorsLoading] = useState(true);
   const [mapReady, setMapReady] = useState(false);
   const [showMapLoadingOverlay, setShowMapLoadingOverlay] = useState(true);
   const [hasResolvedUserLocation, setHasResolvedUserLocation] = useState(false);
@@ -181,14 +184,17 @@ export default function MapScreen() {
 
   useEffect(() => {
     requestUserLocation();
+  }, []);
 
-    const overlayTimeout = setTimeout(() => {
-      setShowMapLoadingOverlay(false);
-    }, 100); // faster
+  useEffect(() => {
+    async function checkHint() {
+      const seen = await AsyncStorage.getItem("seenMapHint");
+      if (!seen) {
+        setShowMapHint(true);
+      }
+    }
 
-    return () => {
-      clearTimeout(overlayTimeout);
-    };
+    checkHint();
   }, []);
 
   useEffect(() => {
@@ -358,13 +364,20 @@ export default function MapScreen() {
   }
 
   async function loadSupabaseVans(force = false) {
-    if (!force && supabaseVans.length > 0) return;
+    if (!force && supabaseVans.length > 0) {
+      setVendorsLoading(false);
+      return;
+    }
+
+    setVendorsLoading(true);
 
     try {
       const vendors = await getAllVendors();
       setSupabaseVans(vendors);
     } catch {
       setSupabaseVans([]);
+    } finally {
+      setVendorsLoading(false);
     }
   }
 
@@ -375,7 +388,9 @@ export default function MapScreen() {
   const filteredVans = useMemo(() => {
     const baseVans =
       selectedFilter === "live"
-        ? supabaseVans.filter((van) => van.isLive && !van.temporary)
+        ? supabaseVans.filter(
+          (van) => van.isLive && !van.temporary
+        )
         : selectedFilter === "spotted"
           ? supabaseVans.filter((van) => van.temporary)
           : supabaseVans;
@@ -400,7 +415,7 @@ export default function MapScreen() {
         if (van.isLive) score += 200;
 
         score += (van.directions ?? 0) * 5;
-        score += (van.views ?? 0);
+        score += van.views ?? 0;
         score += (van.rating ?? 0) * 50;
 
         return score;
@@ -411,8 +426,9 @@ export default function MapScreen() {
 
       return bScore - aScore;
     });
-
   }, [supabaseVans, selectedFilter, searchQuery]);
+
+  const selectedVanCardImage = selectedVan ? getCardImage(selectedVan) : null;
 
   useEffect(() => {
     if (!mapReady) return;
@@ -501,6 +517,11 @@ export default function MapScreen() {
     setSelectedSpotPin(null);
   }
 
+  async function closeMapHint() {
+    setShowMapHint(false);
+    await AsyncStorage.setItem("seenMapHint", "true");
+  }
+
   async function submitSpotVan() {
     if (!spotName.trim()) {
       Alert.alert("Missing name", "Please enter the van name.");
@@ -522,7 +543,9 @@ export default function MapScreen() {
       return;
     }
 
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000
+    ).toISOString();
 
     const newVan: Van = {
       id: `spotted-${Date.now()}`,
@@ -546,7 +569,6 @@ export default function MapScreen() {
     };
 
     try {
-
       await createVendor({
         id: newVan.id,
         name: newVan.name,
@@ -568,12 +590,18 @@ export default function MapScreen() {
         subscriptionTier: "free",
         foodCategories: [],
         spottedBy: user.id,
+        isApproved: true,
       });
 
       await loadSupabaseVans(true);
       setSelectedVan(null);
       cancelSpotFlow();
-      Alert.alert("Success", "Spotted van added to the BiteBeacon map.");
+
+      Alert.alert(
+  "Spot submitted 🔥",
+  "Your spotted van has been submitted for confirmation. If it is confirmed and later claimed, eligible spotters can earn scout points."
+);
+
     } catch (error) {
       Alert.alert(
         "Error",
@@ -622,49 +650,24 @@ export default function MapScreen() {
         }}
       >
         {filteredVans.map((van) => {
-          const isSelected = selectedVan?.id === van.id;
-
           return (
             <Marker
               key={van.id}
               coordinate={{ latitude: van.lat, longitude: van.lng }}
               onPress={() => handleMarkerPress(van)}
-            >
-              <View
-                style={{
-                  padding: van.subscriptionTier === "pro" ? 6 : 2,
-                  backgroundColor:
-                    van.subscriptionTier === "pro"
-                      ? "#FF7A00"
-                      : "transparent",
-                  borderRadius: 999,
-                }}
-              >
-                <View
-                  style={{
-                    width: van.subscriptionTier === "pro" ? 18 : 12,
-                    height: van.subscriptionTier === "pro" ? 18 : 12,
-                    borderRadius: 999,
-                    backgroundColor:
-                      van.listingSource === "user_spotted"
-                        ? "#FF7A00"
-                        : van.subscriptionTier === "pro"
-                          ? "#0B2A5B"
-                          : van.isLive
-                            ? "#1DB954"
-                            : "#E53935",
-                  }}
-                />
-              </View>
-            </Marker>
+              pinColor={
+                van.listingSource === "user_spotted"
+                  ? "#FF7A00"
+                  : van.isLive
+                    ? "#1DB954"
+                    : "#E53935"
+              }
+            />
           );
         })}
 
         {selectedSpotPin ? (
-          <Marker
-            coordinate={selectedSpotPin}
-            pinColor="#FF7A00"
-          />
+          <Marker coordinate={selectedSpotPin} pinColor="#FF7A00" />
         ) : null}
       </MapView>
 
@@ -767,6 +770,14 @@ export default function MapScreen() {
           </View>
         ) : null}
 
+        {vendorsLoading ? (
+          <View style={styles.vendorLoadingPill}>
+            <Text style={styles.vendorLoadingPillText}>
+              Loading nearby vendors...
+            </Text>
+          </View>
+        ) : null}
+
         {!legendOpen ? (
           <Pressable
             style={styles.legendButton}
@@ -851,9 +862,9 @@ export default function MapScreen() {
           >
             <View style={styles.bottomCardTopRow}>
               <View style={styles.bottomCardInfoRow}>
-                {getCardImage(selectedVan) ? (
+                {selectedVanCardImage ? (
                   <Image
-                    source={{ uri: getCardImage(selectedVan)! }}
+                    source={{ uri: selectedVanCardImage }}
                     style={styles.bottomCardImage}
                   />
                 ) : null}
@@ -962,6 +973,18 @@ export default function MapScreen() {
         </Animated.View>
       ) : null}
 
+      {showMapHint ? (
+        <View style={styles.mapHintWrap}>
+          <Text style={styles.mapHintText}>
+            Tap “Spot a Van” to add a new vendor to the map 📍
+          </Text>
+
+          <Pressable onPress={closeMapHint}>
+            <Text style={styles.mapHintClose}>Got it</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <View style={styles.buttonWrap}>
         <Pressable style={styles.primaryButton} onPress={startSpotMode}>
           <Text style={styles.primaryButtonText}>Spot a Van</Text>
@@ -1027,7 +1050,6 @@ export default function MapScreen() {
 }
 
 const styles = StyleSheet.create({
-
   permissionButton: {
     marginTop: 10,
     backgroundColor: "#FFFFFF",
@@ -1041,6 +1063,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 13,
   },
+
   container: {
     flex: 1,
     backgroundColor: "#0B2A5B",
@@ -1097,6 +1120,23 @@ const styles = StyleSheet.create({
 
   searchRow: {
     marginBottom: 10,
+  },
+
+  vendorLoadingPill: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(11,42,91,0.92)",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+    borderWidth: 1.5,
+    borderColor: "#FF7A00",
+  },
+
+  vendorLoadingPillText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 12,
   },
 
   searchInput: {
@@ -1610,5 +1650,31 @@ const styles = StyleSheet.create({
     color: "#0B2A5B",
     fontWeight: "700",
     fontSize: 15,
+  },
+
+  mapHintWrap: {
+    position: "absolute",
+    bottom: 110,
+    left: 20,
+    right: 20,
+    backgroundColor: "rgba(11,42,91,0.96)",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 2,
+    borderColor: "#FF7A00",
+    zIndex: 20,
+  },
+
+  mapHintText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
+    marginBottom: 6,
+  },
+
+  mapHintClose: {
+    color: "#FF7A00",
+    fontWeight: "800",
+    fontSize: 13,
   },
 });

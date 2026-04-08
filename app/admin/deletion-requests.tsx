@@ -31,7 +31,13 @@ export default function AdminDeletionRequestsScreen() {
 
         try {
             const data = await getAllAccountDeletionRequests();
-            setRequests(data);
+
+            const sortedData = [...data].sort(
+                (a, b) =>
+                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+
+            setRequests(sortedData);
         } catch (error) {
             Alert.alert(
                 "Load failed",
@@ -117,7 +123,7 @@ export default function AdminDeletionRequestsScreen() {
                         style={[
                             styles.actionButton,
                             styles.approveButton,
-                            isAnyProcessing && !isProcessing && styles.buttonDisabled,
+                            (isAnyProcessing || isProcessing) && styles.buttonDisabled,
                         ]}
                         onPress={() =>
                             Alert.alert(
@@ -143,7 +149,7 @@ export default function AdminDeletionRequestsScreen() {
                         style={[
                             styles.actionButton,
                             styles.rejectButton,
-                            isAnyProcessing && !isProcessing && styles.buttonDisabled,
+                            (isAnyProcessing || isProcessing) && styles.buttonDisabled,
                         ]}
                         onPress={() =>
                             Alert.alert(
@@ -161,7 +167,9 @@ export default function AdminDeletionRequestsScreen() {
                         }
                         disabled={isAnyProcessing}
                     >
-                        <Text style={styles.actionButtonText}>Reject</Text>
+                        <Text style={styles.actionButtonText}>
+                            {isProcessing ? "Working..." : "Reject"}
+                        </Text>
                     </Pressable>
                 </View>
             </View>
@@ -170,31 +178,34 @@ export default function AdminDeletionRequestsScreen() {
 
     return (
         <View style={styles.container}>
-            <Text style={styles.kicker}>ADMIN</Text>
-            <Text style={styles.title}>Deletion Requests</Text>
-            <Text style={styles.subtitle}>
-                Review account deletion requests submitted by users and vendors.
-            </Text>
-
-            {loading ? (
-                <Text style={styles.helperText}>Loading deletion requests...</Text>
-            ) : (
-                <FlatList
-                    data={requests}
-                    keyExtractor={(item) => item.id}
-                    renderItem={renderItem}
-                    contentContainerStyle={styles.listContent}
-                    ListEmptyComponent={
-                        <Text style={styles.helperText}>
-                            No deletion requests waiting for review.
+            <FlatList
+                data={requests}
+                keyExtractor={(item) => item.id}
+                renderItem={renderItem}
+                contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
+                ListHeaderComponent={
+                    <View style={styles.headerBlock}>
+                        <Text style={styles.kicker}>ADMIN</Text>
+                        <Text style={styles.title}>Deletion Requests</Text>
+                        <Text style={styles.subtitle}>
+                            Review account deletion requests submitted by users and vendors.
                         </Text>
-                    }
-                />
-            )}
-
-            <Pressable style={styles.backButton} onPress={() => router.back()}>
-                <Text style={styles.backButtonText}>Back</Text>
-            </Pressable>
+                    </View>
+                }
+                ListEmptyComponent={
+                    <Text style={styles.helperText}>
+                        {loading
+                            ? "Loading deletion requests..."
+                            : "No deletion requests waiting for review."}
+                    </Text>
+                }
+                ListFooterComponent={
+                    <Pressable style={styles.backButton} onPress={() => router.back()}>
+                        <Text style={styles.backButtonText}>Back</Text>
+                    </Pressable>
+                }
+            />
         </View>
     );
 }
@@ -203,9 +214,12 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: theme.colors.background,
-        padding: 24,
+        paddingHorizontal: 24,
+        paddingTop: 24,
     },
-
+    headerBlock: {
+        marginBottom: 20,
+    },
     kicker: {
         fontSize: 12,
         fontWeight: "800",
@@ -213,32 +227,27 @@ const styles = StyleSheet.create({
         letterSpacing: 1.2,
         marginBottom: 8,
     },
-
     title: {
         fontSize: 30,
         fontWeight: "800",
         color: "#FFFFFF",
         marginBottom: 8,
     },
-
     subtitle: {
         fontSize: 15,
         color: "rgba(255,255,255,0.75)",
         lineHeight: 22,
-        marginBottom: 20,
     },
-
     helperText: {
         fontSize: 15,
         color: "rgba(255,255,255,0.75)",
         lineHeight: 22,
         marginBottom: 20,
     },
-
     listContent: {
         paddingBottom: 20,
+        flexGrow: 1,
     },
-
     card: {
         backgroundColor: "#FFFFFF",
         borderRadius: 18,
@@ -247,20 +256,17 @@ const styles = StyleSheet.create({
         borderWidth: 2,
         borderColor: theme.colors.border,
     },
-
     cardTitle: {
         fontSize: 18,
         fontWeight: "800",
         color: "#0B2A5B",
         marginBottom: 8,
     },
-
     meta: {
         fontSize: 14,
         color: "#444444",
         marginBottom: 4,
     },
-
     reasonLabel: {
         fontSize: 13,
         fontWeight: "800",
@@ -269,43 +275,35 @@ const styles = StyleSheet.create({
         marginBottom: 6,
         letterSpacing: 0.5,
     },
-
     reasonText: {
         fontSize: 14,
         color: "#222222",
         lineHeight: 20,
         marginBottom: 12,
     },
-
     actionsRow: {
         flexDirection: "row",
         gap: 10,
     },
-
     actionButton: {
         flex: 1,
         paddingVertical: 14,
         borderRadius: 14,
         alignItems: "center",
     },
-
     approveButton: {
         backgroundColor: "#1DB954",
     },
-
     rejectButton: {
         backgroundColor: "#C62828",
     },
-
     actionButtonText: {
         color: "#FFFFFF",
         fontWeight: "800",
     },
-
     buttonDisabled: {
         opacity: 0.5,
     },
-
     backButton: {
         backgroundColor: "#D9D9D9",
         paddingVertical: 14,
@@ -313,7 +311,6 @@ const styles = StyleSheet.create({
         alignItems: "center",
         marginTop: 8,
     },
-
     backButtonText: {
         color: "#222222",
         fontSize: 16,

@@ -7,10 +7,14 @@ export type AuthUser = {
   email: string | null;
 };
 
+type ProfileScoutPointsRow = {
+  scout_points?: number | null;
+};
+
 export async function getCurrentUser(): Promise<AuthUser | null> {
   const { data, error } = await supabase.auth.getUser();
 
-  if (error || !data.user) {
+  if (error || !data.user?.id) {
     return null;
   }
 
@@ -41,22 +45,22 @@ export async function signOutCurrentUser(): Promise<void> {
 export async function getCurrentUserVendor(): Promise<Van | null> {
   const user = await getCurrentUser();
 
-  if (!user) {
+  if (!user?.id) {
     return null;
   }
 
-  return getVendorByOwnerId(user.id);
+  return await getVendorByOwnerId(user.id);
 }
 
 export async function isCurrentUserVendor(): Promise<boolean> {
   const vendor = await getCurrentUserVendor();
-  return !!vendor;
+  return Boolean(vendor);
 }
 
 export async function getCurrentUserScoutPoints(): Promise<number> {
   const user = await getCurrentUser();
 
-  if (!user) {
+  if (!user?.id) {
     return 0;
   }
 
@@ -70,5 +74,7 @@ export async function getCurrentUserScoutPoints(): Promise<number> {
     throw new Error(error.message);
   }
 
-  return Number((data as { scout_points?: number | null } | null)?.scout_points ?? 0);
+  const scoutPoints = (data as ProfileScoutPointsRow | null)?.scout_points;
+
+  return Number.isFinite(Number(scoutPoints)) ? Number(scoutPoints) : 0;
 }

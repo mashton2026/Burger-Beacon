@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F7F4F2"
+      "backgroundColor": "#0D1B2A"
     },
     "android": {
       "package": "com.bitebeacon.app",
@@ -28,7 +28,7 @@
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#F7F4F2"
+        "backgroundColor": "#0D1B2A"
       }
     },
     "ios": {
@@ -58,7 +58,7 @@
       "router": {}
     },
     "androidStatusBar": {
-      "backgroundColor": "#F7F4F2"
+      "backgroundColor": "#0D1B2A"
     }
   }
 }

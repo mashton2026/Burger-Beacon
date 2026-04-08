@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -15,8 +15,24 @@ import {
   updateVendorReportStatus,
   type VendorReport,
 } from "../../services/reportService";
-import { getAllVendors, suspendVendor } from "../../services/vendorService";
+import {
+  adminDeleteVendor,
+  getAllVendorsForAdmin,
+  suspendVendor,
+  unsuspendVendor,
+} from "../../services/vendorService";
 import { type Van } from "../../types/van";
+
+type ReportFilter = VendorReport["reason"] | "all" | "high_risk";
+
+const REPORT_REASONS: VendorReport["reason"][] = [
+  "fake_listing",
+  "incorrect_details",
+  "wrong_location",
+  "abusive_content",
+  "spam",
+  "other",
+];
 
 export default function AdminReportsScreen() {
   const [reports, setReports] = useState<VendorReport[]>([]);
@@ -24,9 +40,8 @@ export default function AdminReportsScreen() {
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [adminNotes, setAdminNotes] = useState<Record<string, string>>({});
-  const [selectedReasonFilter, setSelectedReasonFilter] = useState<
-    VendorReport["reason"] | "all" | "high_risk"
-  >("all");
+  const [selectedReasonFilter, setSelectedReasonFilter] =
+    useState<ReportFilter>("all");
 
   useFocusEffect(
     useCallback(() => {
@@ -40,11 +55,28 @@ export default function AdminReportsScreen() {
     try {
       const [reportData, vendorData] = await Promise.all([
         getAllVendorReports(),
-        getAllVendors(),
+        getAllVendorsForAdmin(),
       ]);
 
-      setReports(reportData);
+      const sortedReports = [...reportData].sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+
+      setReports(sortedReports);
       setVendors(vendorData);
+
+      setAdminNotes((current) => {
+        const nextNotes: Record<string, string> = {};
+
+        sortedReports.forEach((report) => {
+          if (current[report.id]) {
+            nextNotes[report.id] = current[report.id];
+          }
+        });
+
+        return nextNotes;
+      });
     } catch (error) {
       Alert.alert(
         "Load failed",
@@ -57,32 +89,73 @@ export default function AdminReportsScreen() {
     }
   }
 
+  const vendorMap = useMemo(() => {
+    const nextMap = new Map<string, Van>();
+
+    vendors.forEach((vendor) => {
+      nextMap.set(String(vendor.id), vendor);
+    });
+
+    return nextMap;
+  }, [vendors]);
+
+  const vendorReportCounts = useMemo(() => {
+    const nextCounts = new Map<string, number>();
+
+    reports.forEach((report) => {
+      const currentCount = nextCounts.get(report.vendor_id) ?? 0;
+      nextCounts.set(report.vendor_id, currentCount + 1);
+    });
+
+    return nextCounts;
+  }, [reports]);
+
+  const highRiskVendorCount = useMemo(() => {
+    return Array.from(vendorReportCounts.values()).filter(
+      (count) => count >= 3
+    ).length;
+  }, [vendorReportCounts]);
+
+  const filteredReports = useMemo(() => {
+    if (selectedReasonFilter === "all") {
+      return reports;
+    }
+
+    if (selectedReasonFilter === "high_risk") {
+      return reports.filter(
+        (report) => (vendorReportCounts.get(report.vendor_id) ?? 0) >= 3
+      );
+    }
+
+    return reports.filter((report) => report.reason === selectedReasonFilter);
+  }, [reports, selectedReasonFilter, vendorReportCounts]);
+
+  function getVendor(vendorId: string) {
+    return vendorMap.get(String(vendorId)) ?? null;
+  }
+
   function getVendorName(vendorId: string) {
-    const match = vendors.find((v) => v.id === vendorId);
-    return match?.name ?? "Unknown vendor";
+    return getVendor(vendorId)?.name ?? "Unknown vendor";
   }
 
   function getVendorReportCount(vendorId: string) {
-    return reports.filter((report) => report.vendor_id === vendorId).length;
+    return vendorReportCounts.get(vendorId) ?? 0;
   }
 
   function isVendorSuspended(vendorId: string) {
-    const match = vendors.find((v) => v.id === vendorId);
-    return !!match?.isSuspended;
+    return !!getVendor(vendorId)?.isSuspended;
   }
 
   function getVendorTier(vendorId: string) {
-    const match = vendors.find((v) => v.id === vendorId);
-    return (match?.subscriptionTier ?? "free").toUpperCase();
+    return (getVendor(vendorId)?.subscriptionTier ?? "free").toUpperCase();
   }
 
   function getVendorClaimState(vendorId: string) {
-    const match = vendors.find((v) => v.id === vendorId);
-    return match?.owner_id ? "Claimed" : "Unclaimed";
+    return getVendor(vendorId)?.owner_id ? "Claimed" : "Unclaimed";
   }
 
   function getVendorListingType(vendorId: string) {
-    const match = vendors.find((v) => v.id === vendorId);
+    const match = getVendor(vendorId);
 
     if (!match) return "Unknown";
     if (match.temporary || match.listingSource === "user_spotted") {
@@ -93,35 +166,14 @@ export default function AdminReportsScreen() {
   }
 
   function getVendorLiveState(vendorId: string) {
-    const match = vendors.find((v) => v.id === vendorId);
+    const match = getVendor(vendorId);
 
     if (!match) return "Unknown";
     return match.isLive ? "Live" : "Offline";
   }
 
   function getVendorCuisine(vendorId: string) {
-    const match = vendors.find((v) => v.id === vendorId);
-    return match?.cuisine ?? "Unknown";
-  }
-
-  function getHighRiskVendorCount() {
-    return Array.from(new Set(reports.map((report) => report.vendor_id))).filter(
-      (vendorId) => getVendorReportCount(vendorId) >= 3
-    ).length;
-  }
-
-  function getFilteredReports() {
-    if (selectedReasonFilter === "all") {
-      return reports;
-    }
-
-    if (selectedReasonFilter === "high_risk") {
-      return reports.filter(
-        (report) => getVendorReportCount(report.vendor_id) >= 3
-      );
-    }
-
-    return reports.filter((report) => report.reason === selectedReasonFilter);
+    return getVendor(vendorId)?.cuisine ?? "Unknown";
   }
 
   async function handleResolve(reportId: string) {
@@ -228,11 +280,50 @@ export default function AdminReportsScreen() {
     }
   }
 
+  async function handleUnsuspendVendor(vendorId: string) {
+    if (processingId) return;
+
+    setProcessingId(vendorId);
+
+    try {
+      await unsuspendVendor(vendorId);
+      Alert.alert("Success", "Vendor unsuspended.");
+      await loadData();
+    } catch (error) {
+      Alert.alert(
+        "Unsuspend failed",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    } finally {
+      setProcessingId(null);
+    }
+  }
+
+  async function handleDeleteVendor(vendorId: string) {
+    if (processingId) return;
+
+    setProcessingId(vendorId);
+
+    try {
+      await adminDeleteVendor(vendorId);
+      Alert.alert("Success", "Vendor deleted.");
+      await loadData();
+    } catch (error) {
+      Alert.alert(
+        "Delete failed",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    } finally {
+      setProcessingId(null);
+    }
+  }
+
   function renderItem({ item }: { item: VendorReport }) {
     const isProcessing = processingId === item.id;
     const isAnyProcessing = processingId !== null;
     const reportCount = getVendorReportCount(item.vendor_id);
     const isHighRisk = reportCount >= 3;
+    const vendorSuspended = isVendorSuspended(item.vendor_id);
 
     return (
       <View style={[styles.card, isHighRisk && styles.highRiskCard]}>
@@ -256,35 +347,25 @@ export default function AdminReportsScreen() {
         <Text
           style={[
             styles.vendorStateText,
-            isVendorSuspended(item.vendor_id)
+            vendorSuspended
               ? styles.vendorStateSuspended
               : styles.vendorStateActive,
           ]}
         >
-          {isVendorSuspended(item.vendor_id)
-            ? "Vendor status: Suspended"
-            : "Vendor status: Active"}
+          {vendorSuspended ? "Vendor status: Suspended" : "Vendor status: Active"}
         </Text>
 
-        <Text style={styles.meta}>
-          Vendor tier: {getVendorTier(item.vendor_id)}
-        </Text>
-
+        <Text style={styles.meta}>Vendor tier: {getVendorTier(item.vendor_id)}</Text>
         <Text style={styles.meta}>
           Claim state: {getVendorClaimState(item.vendor_id)}
         </Text>
-
         <Text style={styles.meta}>
           Listing type: {getVendorListingType(item.vendor_id)}
         </Text>
-
         <Text style={styles.meta}>
           Live state: {getVendorLiveState(item.vendor_id)}
         </Text>
-
-        <Text style={styles.meta}>
-          Cuisine: {getVendorCuisine(item.vendor_id)}
-        </Text>
+        <Text style={styles.meta}>Cuisine: {getVendorCuisine(item.vendor_id)}</Text>
 
         {isHighRisk ? (
           <Text style={styles.highRiskText}>
@@ -295,25 +376,33 @@ export default function AdminReportsScreen() {
         {item.details ? <Text style={styles.details}>{item.details}</Text> : null}
 
         <Pressable
-          style={styles.openVendorButton}
+          style={[
+            styles.openVendorButton,
+            isAnyProcessing && styles.buttonDisabled,
+          ]}
           onPress={() =>
             router.push({
               pathname: "/admin/edit-vendor",
               params: { id: item.vendor_id },
             })
           }
+          disabled={isAnyProcessing}
         >
           <Text style={styles.openVendorButtonText}>Open Vendor</Text>
         </Pressable>
 
         <Pressable
-          style={styles.viewListingButton}
+          style={[
+            styles.viewListingButton,
+            isAnyProcessing && styles.buttonDisabled,
+          ]}
           onPress={() =>
             router.push({
               pathname: "/vendor/[id]",
               params: { id: item.vendor_id },
             })
           }
+          disabled={isAnyProcessing}
         >
           <Text style={styles.viewListingButtonText}>View Listing</Text>
         </Pressable>
@@ -331,6 +420,9 @@ export default function AdminReportsScreen() {
               [item.id]: text,
             }))
           }
+          editable={!isAnyProcessing}
+          maxLength={300}
+          multiline
         />
 
         <View style={styles.actionsRow}>
@@ -338,7 +430,7 @@ export default function AdminReportsScreen() {
             style={[
               styles.button,
               styles.resolveButton,
-              isAnyProcessing && !isProcessing && styles.buttonDisabled,
+              isAnyProcessing && styles.buttonDisabled,
             ]}
             onPress={() =>
               Alert.alert(
@@ -364,7 +456,7 @@ export default function AdminReportsScreen() {
             style={[
               styles.button,
               styles.dismissButton,
-              isAnyProcessing && !isProcessing && styles.buttonDisabled,
+              isAnyProcessing && styles.buttonDisabled,
             ]}
             onPress={() =>
               Alert.alert(
@@ -382,18 +474,20 @@ export default function AdminReportsScreen() {
             }
             disabled={isAnyProcessing}
           >
-            <Text style={styles.buttonText}>Dismiss</Text>
+            <Text style={styles.buttonText}>
+              {isProcessing ? "Working..." : "Dismiss"}
+            </Text>
           </Pressable>
         </View>
 
         <Pressable
           style={[
             styles.suspendButtonFull,
-            isVendorSuspended(item.vendor_id) && styles.buttonDisabled,
-            isAnyProcessing && !isProcessing && styles.buttonDisabled,
+            vendorSuspended && styles.buttonDisabled,
+            isAnyProcessing && styles.buttonDisabled,
           ]}
           onPress={() => {
-            if (isVendorSuspended(item.vendor_id)) {
+            if (vendorSuspended) {
               Alert.alert(
                 "Already suspended",
                 "This vendor is already suspended."
@@ -415,148 +509,200 @@ export default function AdminReportsScreen() {
               ]
             );
           }}
-          disabled={isAnyProcessing}
+          disabled={isAnyProcessing || vendorSuspended}
         >
           <Text style={styles.buttonText}>
-            {isVendorSuspended(item.vendor_id)
+            {vendorSuspended
               ? "Vendor Already Suspended"
               : isProcessing
                 ? "Working..."
                 : "Suspend Vendor"}
           </Text>
         </Pressable>
+
+        {/* UNSUSPEND BUTTON */}
+        {vendorSuspended && (
+          <Pressable
+            style={[
+              styles.resolveButton,
+              styles.button,
+              isAnyProcessing && styles.buttonDisabled,
+            ]}
+            onPress={() =>
+              Alert.alert(
+                "Unsuspend vendor?",
+                "This will restore the vendor to the app.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Unsuspend",
+                    onPress: () => handleUnsuspendVendor(item.vendor_id),
+                  },
+                ]
+              )
+            }
+            disabled={isAnyProcessing}
+          >
+            <Text style={styles.buttonText}>Unsuspend Vendor</Text>
+          </Pressable>
+        )}
+
+        {/* DELETE BUTTON */}
+        <Pressable
+          style={[
+            styles.dismissButton,
+            styles.button,
+            isAnyProcessing && styles.buttonDisabled,
+          ]}
+          onPress={() =>
+            Alert.alert(
+              "Delete vendor?",
+              "This will permanently delete this vendor. This cannot be undone.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Delete",
+                  style: "destructive",
+                  onPress: () => handleDeleteVendor(item.vendor_id),
+                },
+              ]
+            )
+          }
+          disabled={isAnyProcessing}
+        >
+          <Text style={styles.buttonText}>Delete Vendor</Text>
+        </Pressable>
+
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.kicker}>ADMIN</Text>
-      <Text style={styles.title}>Reports</Text>
-      <Text style={styles.subtitle}>
-        Review and moderate user-submitted reports.
-      </Text>
+      <FlatList
+        data={filteredReports}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <>
+            <Text style={styles.kicker}>ADMIN</Text>
+            <Text style={styles.title}>Reports</Text>
+            <Text style={styles.subtitle}>
+              Review and moderate user-submitted reports.
+            </Text>
 
-      <View style={styles.reasonSummary}>
-        <Pressable
-          style={[
-            styles.reasonChip,
-            selectedReasonFilter === "all" && styles.reasonChipActive,
-          ]}
-          onPress={() => setSelectedReasonFilter("all")}
-        >
-          <Text
-            style={[
-              styles.reasonChipText,
-              selectedReasonFilter === "all" && styles.reasonChipTextActive,
-            ]}
-          >
-            all ({reports.length})
-          </Text>
-        </Pressable>
-
-        <Pressable
-          style={[
-            styles.reasonChip,
-            selectedReasonFilter === "high_risk" && styles.reasonChipActive,
-          ]}
-          onPress={() => setSelectedReasonFilter("high_risk")}
-        >
-          <Text
-            style={[
-              styles.reasonChipText,
-              selectedReasonFilter === "high_risk" && styles.reasonChipTextActive,
-            ]}
-          >
-            high risk ({getHighRiskVendorCount()})
-          </Text>
-        </Pressable>
-
-        {[
-          "fake_listing",
-          "incorrect_details",
-          "wrong_location",
-          "abusive_content",
-          "spam",
-          "other",
-        ].map((reason) => {
-          const count = reports.filter((r) => r.reason === reason).length;
-
-          if (count === 0) return null;
-
-          return (
-            <Pressable
-              key={reason}
-              style={[
-                styles.reasonChip,
-                selectedReasonFilter === reason && styles.reasonChipActive,
-              ]}
-              onPress={() =>
-                setSelectedReasonFilter(reason as VendorReport["reason"])
-              }
-            >
-              <Text
+            <View style={styles.reasonSummary}>
+              <Pressable
                 style={[
-                  styles.reasonChipText,
-                  selectedReasonFilter === reason &&
-                  styles.reasonChipTextActive,
+                  styles.reasonChip,
+                  selectedReasonFilter === "all" && styles.reasonChipActive,
                 ]}
+                onPress={() => setSelectedReasonFilter("all")}
               >
-                {reason.replace(/_/g, " ")} ({count})
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+                <Text
+                  style={[
+                    styles.reasonChipText,
+                    selectedReasonFilter === "all" &&
+                    styles.reasonChipTextActive,
+                  ]}
+                >
+                  all ({reports.length})
+                </Text>
+              </Pressable>
 
-      <View style={styles.summaryCardsRow}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryCardLabel}>Open Reports</Text>
-          <Text style={styles.summaryCardValue}>{reports.length}</Text>
-        </View>
+              <Pressable
+                style={[
+                  styles.reasonChip,
+                  selectedReasonFilter === "high_risk" &&
+                  styles.reasonChipActive,
+                ]}
+                onPress={() => setSelectedReasonFilter("high_risk")}
+              >
+                <Text
+                  style={[
+                    styles.reasonChipText,
+                    selectedReasonFilter === "high_risk" &&
+                    styles.reasonChipTextActive,
+                  ]}
+                >
+                  high risk ({highRiskVendorCount})
+                </Text>
+              </Pressable>
 
-        <View style={styles.highRiskSummaryCard}>
-          <Text style={styles.highRiskSummaryLabel}>High-Risk Vendors</Text>
-          <Text style={styles.highRiskSummaryValue}>
-            {getHighRiskVendorCount()}
-          </Text>
-        </View>
-      </View>
+              {REPORT_REASONS.map((reason) => {
+                const count = reports.filter((r) => r.reason === reason).length;
 
-      {loading ? (
-        <Text style={styles.helper}>Loading reports...</Text>
-      ) : (
-        <>
-          <Text style={styles.activeFilterText}>
-            Viewing:{" "}
-            {selectedReasonFilter === "all"
-              ? "all reports"
-              : selectedReasonFilter === "high_risk"
-                ? "high risk vendors"
-                : selectedReasonFilter.replace(/_/g, " ")}
-          </Text>
+                if (count === 0) return null;
 
-          <FlatList
-            data={getFilteredReports()}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            contentContainerStyle={styles.list}
-            ListEmptyComponent={
-              <Text style={styles.helper}>
+                return (
+                  <Pressable
+                    key={reason}
+                    style={[
+                      styles.reasonChip,
+                      selectedReasonFilter === reason &&
+                      styles.reasonChipActive,
+                    ]}
+                    onPress={() => setSelectedReasonFilter(reason)}
+                  >
+                    <Text
+                      style={[
+                        styles.reasonChipText,
+                        selectedReasonFilter === reason &&
+                        styles.reasonChipTextActive,
+                      ]}
+                    >
+                      {reason.replace(/_/g, " ")} ({count})
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.summaryCardsRow}>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryCardLabel}>Open Reports</Text>
+                <Text style={styles.summaryCardValue}>{reports.length}</Text>
+              </View>
+
+              <View style={styles.highRiskSummaryCard}>
+                <Text style={styles.highRiskSummaryLabel}>High-Risk Vendors</Text>
+                <Text style={styles.highRiskSummaryValue}>
+                  {highRiskVendorCount}
+                </Text>
+              </View>
+            </View>
+
+            {!loading ? (
+              <Text style={styles.activeFilterText}>
+                Viewing:{" "}
                 {selectedReasonFilter === "all"
-                  ? "No reports found."
+                  ? "all reports"
                   : selectedReasonFilter === "high_risk"
-                    ? "No high risk vendors found."
-                    : `No ${selectedReasonFilter.replace(/_/g, " ")} reports found.`}
+                    ? "high risk vendors"
+                    : selectedReasonFilter.replace(/_/g, " ")}
               </Text>
-            }
-          />
-        </>
-      )}
-
-      <Pressable style={styles.backButton} onPress={() => router.back()}>
-        <Text style={styles.backButtonText}>Back</Text>
-      </Pressable>
+            ) : null}
+          </>
+        }
+        ListEmptyComponent={
+          <Text style={styles.helper}>
+            {loading
+              ? "Loading reports..."
+              : selectedReasonFilter === "all"
+                ? "No reports found."
+                : selectedReasonFilter === "high_risk"
+                  ? "No high risk vendors found."
+                  : `No ${selectedReasonFilter.replace(/_/g, " ")} reports found.`}
+          </Text>
+        }
+        ListFooterComponent={
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Text style={styles.backButtonText}>Back</Text>
+          </Pressable>
+        }
+      />
     </View>
   );
 }
@@ -656,7 +802,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingTop: 24,
   },
 
   kicker: {
@@ -687,6 +834,7 @@ const styles = StyleSheet.create({
 
   list: {
     paddingBottom: 20,
+    flexGrow: 1,
   },
 
   card: {
@@ -781,6 +929,8 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
     color: "#222",
+    minHeight: 52,
+    textAlignVertical: "top",
   },
 
   actionsRow: {

@@ -2,14 +2,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { useRef, useState } from "react";
 import {
-    Dimensions,
-    NativeScrollEvent,
-    NativeSyntheticEvent,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Dimensions,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 const { width } = Dimensions.get("window");
@@ -17,24 +17,45 @@ const { width } = Dimensions.get("window");
 const slides = [
   {
     eyebrow: "DISCOVER",
-    title: "Food worth travelling for",
-    text: "Find top local food, hidden gems and independent favourites across Cornwall — all in one place.",
+    title: "Find unreal local food",
+    text: "Discover the best food vans, hidden gems and independent favourites around you — all in one place.",
     icon: "📍",
-    pills: ["Burgers", "Seafood", "Beach Food"],
+    pills: ["Near you", "Hidden gems", "Top local spots"],
+  },
+  {
+    eyebrow: "EXPLORE",
+    title: "See what’s actually worth it",
+    text: "Use the live map to find great food nearby and stop wasting time on average places.",
+    icon: "🗺️",
+    pills: ["Live map", "Nearby food", "Fast discovery"],
   },
   {
     eyebrow: "COMMUNITY",
-    title: "Help build the map",
-    text: "Seen a great food van or local gem? Add it to BiteBeacon and help others discover it.",
-    icon: "🧭",
-    pills: ["Spot vans", "Add locations", "Grow the map"],
+    title: "Built by the community",
+    text: "Seen a great food van missing? Add it and help others discover it. BiteBeacon grows through people like you.",
+    icon: "🔥",
+    pills: ["Add spots", "Support locals", "Grow the map"],
   },
   {
     eyebrow: "REWARDS",
-    title: "Earn as you discover",
-    text: "Earn Scout Points when vendors claim places you spotted and help grow the BiteBeacon network.",
+    title: "Get recognised for great finds",
+    text: "When vendors claim listings you spotted, you earn points. The best spotters will be rewarded as BiteBeacon grows.",
     icon: "🏆",
-    pills: ["Scout Points", "Vendor claims", "Rewards"],
+    pills: ["Earn points", "Vendor claims", "Future rewards"],
+  },
+  {
+    eyebrow: "VENDORS",
+    title: "Own your listing",
+    text: "Vendors can claim their business, manage their presence, and stay visible to nearby customers.",
+    icon: "🚚",
+    pills: ["Claim listings", "Stay visible", "Grow your business"],
+  },
+  {
+    eyebrow: "EARLY ACCESS",
+    title: "You’re early",
+    text: "BiteBeacon is just getting started. Early users help shape the platform and will benefit the most as it grows.",
+    icon: "🚀",
+    pills: ["Early access", "Shape the app", "Be first"],
   },
 ];
 
@@ -44,7 +65,7 @@ export default function OnboardingScreen() {
 
   async function finish() {
     await AsyncStorage.setItem("seenOnboarding", "true");
-    router.replace("/(tabs)/explore");
+    router.replace("/welcome");
   }
 
   function next() {
@@ -57,7 +78,6 @@ export default function OnboardingScreen() {
       });
       return;
     }
-
     finish();
   }
 
@@ -76,21 +96,18 @@ export default function OnboardingScreen() {
 
   return (
     <View style={styles.container}>
-      {/* BRAND HEADER */}
       <View style={styles.topRow}>
         <View>
           <Text style={styles.brandTitle}>BiteBeacon</Text>
           <Text style={styles.brandSubtitle}>
-            Discover Cornwall’s best local food
+            Discover the best local food around you
           </Text>
         </View>
-
         <Pressable onPress={skip} hitSlop={12}>
           <Text style={styles.skipText}>Skip</Text>
         </Pressable>
       </View>
 
-      {/* SLIDES */}
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -123,7 +140,6 @@ export default function OnboardingScreen() {
         ))}
       </ScrollView>
 
-      {/* FOOTER */}
       <View style={styles.footer}>
         <View style={styles.dots}>
           {slides.map((_, i) => (
@@ -157,7 +173,6 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 32,
   },
-
   topRow: {
     paddingHorizontal: 24,
     marginBottom: 20,
@@ -165,32 +180,27 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
   },
-
   brandTitle: {
     color: WHITE,
     fontSize: 28,
     fontWeight: "800",
   },
-
   brandSubtitle: {
     color: "rgba(255,255,255,0.75)",
     fontSize: 14,
     marginTop: 4,
     fontWeight: "600",
   },
-
   skipText: {
     color: WHITE,
     fontSize: 16,
     fontWeight: "800",
   },
-
   slide: {
     width,
     paddingHorizontal: 24,
     justifyContent: "center",
   },
-
   card: {
     backgroundColor: NAVY_DEEP,
     borderRadius: 28,
@@ -200,7 +210,6 @@ const styles = StyleSheet.create({
     minHeight: 500,
     justifyContent: "center",
   },
-
   iconOuter: {
     width: 110,
     height: 110,
@@ -211,7 +220,6 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 24,
   },
-
   iconInner: {
     width: 80,
     height: 80,
@@ -222,11 +230,9 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: ORANGE_SOFT,
   },
-
   icon: {
     fontSize: 34,
   },
-
   eyebrow: {
     color: ORANGE,
     fontSize: 12,
@@ -235,15 +241,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 8,
   },
-
   title: {
     color: WHITE,
-    fontSize: 36,
+    fontSize: 34,
     fontWeight: "800",
     textAlign: "center",
     marginBottom: 12,
   },
-
   text: {
     color: "rgba(255,255,255,0.82)",
     fontSize: 16,
@@ -251,14 +255,12 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 22,
   },
-
   pillWrap: {
     flexDirection: "row",
     justifyContent: "center",
     gap: 10,
     flexWrap: "wrap",
   },
-
   pill: {
     backgroundColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 14,
@@ -267,36 +269,30 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
   },
-
   pillText: {
     color: WHITE,
     fontWeight: "700",
     fontSize: 12,
   },
-
   footer: {
     paddingHorizontal: 24,
   },
-
   dots: {
     flexDirection: "row",
     justifyContent: "center",
     marginBottom: 16,
     gap: 8,
   },
-
   dot: {
     width: 10,
     height: 10,
     borderRadius: 10,
     backgroundColor: "rgba(255,255,255,0.3)",
   },
-
   activeDot: {
     width: 28,
     backgroundColor: ORANGE,
   },
-
   button: {
     backgroundColor: ORANGE,
     paddingVertical: 18,
@@ -305,7 +301,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: ORANGE_SOFT,
   },
-
   buttonText: {
     color: WHITE,
     fontSize: 18,

@@ -22,6 +22,7 @@ type VendorRow = {
   menu_pdf_name?: string | null;
   vendor_message?: string | null;
   is_live?: boolean | null;
+  isApproved?: boolean | null;
   views?: number | null;
   directions?: number | null;
   owner_id?: string | null;
@@ -35,40 +36,74 @@ type VendorRow = {
   subscription_status?: string | null;
 };
 
+function toSafeNumber(value: number | string | null | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toSafeString(value: string | null | undefined): string {
+  return typeof value === "string" ? value : "";
+}
+
+function toNullableString(value: string | null | undefined): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function toSafeStringArray(value: string[] | null | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+function toSafeSubscriptionTier(
+  value: SubscriptionTier | null | undefined
+): SubscriptionTier {
+  return value === "growth" || value === "pro" || value === "free"
+    ? value
+    : "free";
+}
+
 export function mapVendorRowToVan(row: VendorRow): Van {
+  const safePhoto = toNullableString(row.photo);
+  const safePhotos = toSafeStringArray(row.photos);
+  const mergedPhotos = safePhotos.length > 0 ? safePhotos : safePhoto ? [safePhoto] : [];
+
   return {
     id: String(row.id),
-    name: row.name ?? "",
-    lat: Number.isFinite(Number(row.lat)) ? Number(row.lat) : 0,
-    lng: Number.isFinite(Number(row.lng)) ? Number(row.lng) : 0,
-    rating: Number.isFinite(Number(row.rating)) ? Number(row.rating) : 0,
-    cuisine: row.cuisine ?? "",
+    name: toSafeString(row.name),
+    lat: toSafeNumber(row.lat),
+    lng: toSafeNumber(row.lng),
+    rating: toSafeNumber(row.rating),
+    cuisine: toSafeString(row.cuisine),
     temporary: row.temporary ?? false,
     listingSource: row.listing_source ?? "admin_seeded",
-    expiresAt: row.expires_at ?? null,
-    expiredAt: row.expired_at ?? null,
-    photo: row.photo ?? null,
-    photos: row.photos ?? (row.photo ? [row.photo] : []),
-    logoUrl: row.logo_url ?? null,
-    logoPath: row.logo_path ?? null,
-    vendorName: row.vendor_name ?? "",
-    menu: row.menu ?? "",
-    schedule: row.schedule ?? "",
-    menuPdfUrl: row.menu_pdf_url ?? null,
-    menuPdfName: row.menu_pdf_name ?? null,
-    vendorMessage: row.vendor_message ?? "",
+    expiresAt: toNullableString(row.expires_at),
+    expiredAt: toNullableString(row.expired_at),
+    photo: safePhoto,
+    photos: mergedPhotos,
+    logoUrl: toNullableString(row.logo_url),
+    logoPath: toNullableString(row.logo_path),
+    vendorName: toSafeString(row.vendor_name),
+    menu: toSafeString(row.menu),
+    schedule: toSafeString(row.schedule),
+    menuPdfUrl: toNullableString(row.menu_pdf_url),
+    menuPdfName: toNullableString(row.menu_pdf_name),
+    vendorMessage: toSafeString(row.vendor_message),
     isLive: row.is_live ?? false,
-    views: row.views ?? 0,
-    directions: row.directions ?? 0,
-    owner_id: row.owner_id ?? null,
-    subscriptionTier: row.subscription_tier ?? "free",
-    foodCategories: row.food_categories ?? [],
+    isApproved: (row as any).isApproved ?? (row as any).isapproved ?? false,
+    views: typeof row.views === "number" && Number.isFinite(row.views) ? row.views : 0,
+    directions:
+      typeof row.directions === "number" && Number.isFinite(row.directions)
+        ? row.directions
+        : 0,
+    owner_id: toNullableString(row.owner_id),
+    subscriptionTier: toSafeSubscriptionTier(row.subscription_tier),
+    foodCategories: toSafeStringArray(row.food_categories),
     isSuspended: row.is_suspended ?? false,
-    suspensionReason: row.suspension_reason ?? null,
-    suspendedAt: row.suspended_at ?? null,
-    stripe_customer_id: row.stripe_customer_id ?? null,
-    stripe_subscription_id: row.stripe_subscription_id ?? null,
-    subscription_status: row.subscription_status ?? null,
+    suspensionReason: toNullableString(row.suspension_reason),
+    suspendedAt: toNullableString(row.suspended_at),
+    stripe_customer_id: toNullableString(row.stripe_customer_id),
+    stripe_subscription_id: toNullableString(row.stripe_subscription_id),
+    subscription_status: toNullableString(row.subscription_status),
   };
 }
 

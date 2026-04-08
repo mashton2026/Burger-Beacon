@@ -5,22 +5,38 @@ import { View } from "react-native";
 
 export default function IndexScreen() {
   useEffect(() => {
+    let isMounted = true;
+
     async function checkOnboarding() {
+      try {
+        
+        await AsyncStorage.removeItem("seenOnboarding");
+        
+        const seenOnboarding = await AsyncStorage.getItem("seenOnboarding");
 
-      // 👇 TEMP: force reset onboarding
-      await AsyncStorage.removeItem("seenOnboarding");
+        if (!isMounted) return;
 
-      const seenOnboarding = null;
+        if (seenOnboarding === "true") {
+          // ✅ User has already seen onboarding
+          router.replace("/welcome");
+          return;
+        }
 
-      if (seenOnboarding === "true") {
-        router.replace("/(tabs)/explore");
-        return;
+        // ❗ First time user
+        router.replace("/onboarding");
+      } catch {
+        // ✅ SAFE FALLBACK (never leave user stuck)
+        if (isMounted) {
+          router.replace("/welcome");
+        }
       }
-
-      router.replace("/onboarding");
     }
 
     checkOnboarding();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   return <View style={{ flex: 1 }} />;

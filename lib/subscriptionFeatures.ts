@@ -24,7 +24,6 @@ const subscriptionFeatureMap: Record<SubscriptionTier, SubscriptionFeatures> = {
     featuredBadge: false,
     trendingBoost: false,
   },
-
   growth: {
     images: true,
     liveStatus: true,
@@ -36,7 +35,6 @@ const subscriptionFeatureMap: Record<SubscriptionTier, SubscriptionFeatures> = {
     featuredBadge: false,
     trendingBoost: false,
   },
-
   pro: {
     images: true,
     liveStatus: true,
@@ -56,33 +54,40 @@ const subscriptionTierRank: Record<SubscriptionTier, number> = {
   pro: 2,
 };
 
+function normalizeSubscriptionTier(tier?: SubscriptionTier | string | null): SubscriptionTier {
+  return tier === "growth" || tier === "pro" ? tier : "free";
+}
+
 export function getSubscriptionFeatures(
   tier?: SubscriptionTier
 ): SubscriptionFeatures {
-  return subscriptionFeatureMap[tier ?? "free"];
+  return subscriptionFeatureMap[normalizeSubscriptionTier(tier)];
 }
 
 export function getSubscriptionTierRank(tier?: SubscriptionTier): number {
-  return subscriptionTierRank[tier ?? "free"];
+  return subscriptionTierRank[normalizeSubscriptionTier(tier)];
 }
 
 export function hasTierAccess(
   tier: SubscriptionTier | undefined,
   minimumTier: SubscriptionTier
 ): boolean {
-  return getSubscriptionTierRank(tier) >= subscriptionTierRank[minimumTier];
+  return (
+    getSubscriptionTierRank(tier) >=
+    subscriptionTierRank[normalizeSubscriptionTier(minimumTier)]
+  );
 }
 
 export function isFreeTier(tier?: SubscriptionTier): boolean {
-  return (tier ?? "free") === "free";
+  return normalizeSubscriptionTier(tier) === "free";
 }
 
 export function isGrowthTier(tier?: SubscriptionTier): boolean {
-  return (tier ?? "free") === "growth";
+  return normalizeSubscriptionTier(tier) === "growth";
 }
 
 export function isProTier(tier?: SubscriptionTier): boolean {
-  return (tier ?? "free") === "pro";
+  return normalizeSubscriptionTier(tier) === "pro";
 }
 
 export function getPlacementBoostScore(tier?: SubscriptionTier): number {

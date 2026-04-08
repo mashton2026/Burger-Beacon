@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { theme } from "../constants/theme";
 
@@ -25,6 +26,23 @@ export default function BurgerVanCard({
   subscriptionTier,
   vendorMessage,
 }: Props) {
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  const safeName = name?.trim() || "Unnamed vendor";
+  const safeCuisine = cuisine?.trim() || "Cuisine not provided";
+
+  const safeRating = useMemo(() => {
+    return Number.isFinite(rating) ? rating : 0;
+  }, [rating]);
+
+  const safeDistanceText = useMemo(() => {
+    if (distanceMiles === undefined || distanceMiles === null) return null;
+    if (!Number.isFinite(distanceMiles)) return null;
+    return `${distanceMiles.toFixed(1)} mi`;
+  }, [distanceMiles]);
+
+  const hasVendorMessage = !!vendorMessage?.trim();
+
   const statusText = temporary
     ? "SPOTTED"
     : isLive
@@ -33,10 +51,27 @@ export default function BurgerVanCard({
         ? "FEATURED"
         : "LISTED";
 
+  function handlePress() {
+    if (isNavigating || !id) return;
+
+    setIsNavigating(true);
+
+    router.push({
+      pathname: "/vendor/[id]",
+      params: { id },
+    });
+  }
+
   return (
     <Pressable
-      onPress={() => router.push(`/vendor/${id}`)}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      onPress={handlePress}
+      disabled={isNavigating || !id}
+      accessibilityRole="button"
+      style={({ pressed }) => [
+        styles.card,
+        pressed && styles.cardPressed,
+        (isNavigating || !id) && styles.cardDisabled,
+      ]}
     >
       <View style={styles.glowOrb} />
       <View style={styles.topAccentLine} />
@@ -53,7 +88,7 @@ export default function BurgerVanCard({
             </View>
           ) : null}
 
-          {!!vendorMessage?.trim() ? (
+          {hasVendorMessage ? (
             <View style={[styles.badge, styles.dealBadge]}>
               <Text style={styles.badgeText}>DEAL</Text>
             </View>
@@ -76,24 +111,22 @@ export default function BurgerVanCard({
 
       <View style={styles.content}>
         <Text style={styles.name} numberOfLines={1}>
-          {name}
+          {safeName}
         </Text>
 
         <Text style={styles.meta} numberOfLines={1}>
-          {cuisine}
+          {safeCuisine}
         </Text>
 
         <View style={styles.footerRow}>
           <View style={styles.infoPill}>
             <Text style={styles.star}>★</Text>
-            <Text style={styles.infoPillText}>{rating.toFixed(1)}</Text>
+            <Text style={styles.infoPillText}>{safeRating.toFixed(1)}</Text>
           </View>
 
-          {distanceMiles !== undefined && distanceMiles !== null ? (
+          {safeDistanceText ? (
             <View style={styles.infoPill}>
-              <Text style={styles.infoPillText}>
-                {distanceMiles.toFixed(1)} mi
-              </Text>
+              <Text style={styles.infoPillText}>{safeDistanceText}</Text>
             </View>
           ) : null}
         </View>
@@ -105,24 +138,25 @@ export default function BurgerVanCard({
 const styles = StyleSheet.create({
   card: {
     backgroundColor: "#F9FBFF",
-    borderRadius: 20,
-    marginBottom: 12,
+    borderRadius: 16,
+    marginBottom: 10,
     overflow: "hidden",
     position: "relative",
     borderWidth: 1.5,
     borderColor: "rgba(255,122,0,0.35)",
     shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
-
   cardPressed: {
     opacity: 0.97,
     transform: [{ scale: 0.995 }],
   },
-
+  cardDisabled: {
+    opacity: 0.92,
+  },
   glowOrb: {
     position: "absolute",
     top: -24,
@@ -132,121 +166,101 @@ const styles = StyleSheet.create({
     borderRadius: 45,
     backgroundColor: "rgba(255,122,0,0.10)",
   },
-
   topAccentLine: {
     height: 5,
     backgroundColor: theme.colors.primary,
   },
-
   headerRow: {
-    paddingTop: 12,
-    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingHorizontal: 12,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     gap: 10,
   },
-
   leftBadges: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
     flex: 1,
   },
-
   badge: {
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 999,
   },
-
   featuredBadge: {
     backgroundColor: theme.colors.primary,
   },
-
   growthBadge: {
     backgroundColor: theme.colors.background,
   },
-
   dealBadge: {
     backgroundColor: theme.colors.success,
   },
-
   badgeText: {
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "800",
   },
-
   statusPill: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
   },
-
   statusLive: {
     backgroundColor: "rgba(29,185,84,0.14)",
   },
-
   statusListed: {
     backgroundColor: "rgba(11,42,91,0.10)",
   },
-
   statusSpotted: {
     backgroundColor: "rgba(255,122,0,0.14)",
   },
-
   statusPillText: {
     fontSize: 10,
     fontWeight: "800",
     color: theme.colors.background,
   },
-
   content: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 12,
   },
-
   name: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: "800",
     color: theme.colors.background,
     marginBottom: 6,
   },
-
   meta: {
-    fontSize: 13,
+    fontSize: 12,
     color: theme.colors.muted,
-    marginBottom: 12,
+    marginBottom: 8,
   },
-
   footerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     gap: 10,
   },
-
   infoPill: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderWidth: 1,
     borderColor: "rgba(11,42,91,0.08)",
   },
-
   star: {
     fontSize: 14,
     color: theme.colors.secondary,
     marginRight: 6,
   },
-
   infoPillText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     color: theme.colors.background,
   },

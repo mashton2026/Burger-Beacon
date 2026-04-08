@@ -221,6 +221,91 @@ Deno.serve(async (req) => {
             );
         }
 
+        if (event.type === "customer.subscription.updated") {
+            const subscription = event.data.object;
+            const stripeSubscriptionId = subscription.id;
+
+            const updatedPriceId =
+                subscription.items?.data?.[0]?.price?.id ?? null;
+
+            let nextTier: "free" | "growth" | "pro" | null = null;
+
+            if (updatedPriceId === "price_1TGMXnPDTRLYMBotypaooxb6") {
+                nextTier = "growth";
+            }
+
+            if (updatedPriceId === "price_1TGMe2PDTRLYMBotJMfaW1ql") {
+                nextTier = "pro";
+            }
+
+            if (!nextTier) {
+                return new Response(
+                    JSON.stringify({
+                        received: true,
+                        ignored: true,
+                        eventType: event.type,
+                        reason: "Unknown price ID",
+                    }),
+                    {
+                        status: 200,
+                        headers: {
+                            ...corsHeaders,
+                            "Content-Type": "application/json",
+                        },
+                    }
+                );
+            }
+
+            const subscriptionStatus =
+                typeof subscription.status === "string"
+                    ? subscription.status
+                    : "active";
+
+            const { error } = await supabase
+                .from("vendors")
+                .update({
+                    subscription_tier: nextTier,
+                    subscription_status: subscriptionStatus,
+                    stripe_customer_id: subscription.customer,
+                    stripe_subscription_id: stripeSubscriptionId,
+                })
+                .eq("stripe_subscription_id", stripeSubscriptionId);
+
+            if (error) {
+                console.error("Failed to update subscription tier from portal change:", error);
+                return new Response(
+                    JSON.stringify({
+                        error: "Failed to update subscription tier",
+                        details: error.message,
+                    }),
+                    {
+                        status: 500,
+                        headers: {
+                            ...corsHeaders,
+                            "Content-Type": "application/json",
+                        },
+                    }
+                );
+            }
+
+            return new Response(
+                JSON.stringify({
+                    received: true,
+                    updated: true,
+                    eventType: event.type,
+                    stripeSubscriptionId,
+                    subscriptionTier: nextTier,
+                }),
+                {
+                    status: 200,
+                    headers: {
+                        ...corsHeaders,
+                        "Content-Type": "application/json",
+                    },
+                }
+            );
+        }
+
         if (event.type === "customer.subscription.deleted") {
             const subscription = event.data.object;
             const stripeSubscriptionId = subscription.id;

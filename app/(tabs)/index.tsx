@@ -16,9 +16,8 @@ import {
 
 import BurgerVanCard from "../../components/BurgerVanCard";
 import { theme } from "../../constants/theme";
-import { mapVendorRowsToVans } from "../../lib/mapVendor";
 import { getSubscriptionFeatures } from "../../lib/subscriptionFeatures";
-import { supabase } from "../../lib/supabase";
+import { getAllVendors } from "../../services/vendorService";
 import { type Van } from "../../types/van";
 
 const CUSTOM_VANS_KEY = "bitebeacon_custom_vans";
@@ -54,16 +53,6 @@ function normalizeText(value?: string | null) {
   return (value ?? "").trim().toLowerCase();
 }
 
-function matchesFoodCategory(van: Van, category: string) {
-  const target = normalizeText(category);
-
-  if (!target) return true;
-
-  return (van.foodCategories ?? []).some(
-    (item) => normalizeText(item) === target
-  );
-}
-
 function matchesSearchQuery(van: Van, query: string) {
   const search = normalizeText(query);
 
@@ -72,31 +61,33 @@ function matchesSearchQuery(van: Van, query: string) {
   const inName = normalizeText(van.name).includes(search);
   const inVendorName = normalizeText(van.vendorName).includes(search);
   const inCuisine = normalizeText(van.cuisine).includes(search);
+  const inMenu = normalizeText(van.menu).includes(search);
   const inCategories = (van.foodCategories ?? []).some((category) =>
     normalizeText(category).includes(search)
   );
 
-  return inName || inVendorName || inCuisine || inCategories;
+  return inName || inVendorName || inCuisine || inMenu || inCategories;
 }
 
 export default function HomeScreen() {
   const [supabaseVans, setSupabaseVans] = useState<Van[]>([]);
   const [customVans, setCustomVans] = useState<Van[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<BrowseFilter>("ALL");
-  const [selectedFoodCategory, setSelectedFoodCategory] =
-    useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(20);
   const [userLocation, setUserLocation] = useState<{
     latitude: number;
     longitude: number;
   } | null>(null);
+  const [vendorsLoading, setVendorsLoading] = useState(true);
 
+  const hasLoadedInitialData = useRef(false);
   const aboutFade = useRef(new Animated.Value(0)).current;
   const aboutSlide = useRef(new Animated.Value(8)).current;
 
   useEffect(() => {
     requestUserLocation();
-    loadSupabaseVans();
+    loadInitialData();
 
     Animated.parallel([
       Animated.timing(aboutFade, {
@@ -114,21 +105,34 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!hasLoadedInitialData.current) return;
       loadCustomVans();
       loadSupabaseVans();
     }, [])
   );
 
-  async function loadSupabaseVans() {
-    const { data, error } = await supabase.from("vendors").select("*");
+  async function loadInitialData() {
+    setVendorsLoading(true);
 
-    if (error) {
-      console.log("Error loading vendors:", error.message);
-      return;
+    try {
+      await Promise.all([loadCustomVans(), loadSupabaseVans()]);
+      hasLoadedInitialData.current = true;
+    } finally {
+      setVendorsLoading(false);
     }
+  }
 
-    const mappedVans = mapVendorRowsToVans(data ?? []);
-    setSupabaseVans(mappedVans);
+  async function loadSupabaseVans() {
+    try {
+      const vendors = await getAllVendors();
+      setSupabaseVans(vendors);
+    } catch (error) {
+      console.log(
+        "Error loading vendors:",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+      setSupabaseVans([]);
+    }
   }
 
   async function loadCustomVans() {
@@ -153,7 +157,18 @@ export default function HomeScreen() {
 
       if (permission.status !== "granted") return;
 
-      const current = await Location.getCurrentPositionAsync({});
+      const lastKnown = await Location.getLastKnownPositionAsync();
+
+      if (lastKnown) {
+        setUserLocation({
+          latitude: lastKnown.coords.latitude,
+          longitude: lastKnown.coords.longitude,
+        });
+      }
+
+      const current = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
 
       setUserLocation({
         latitude: current.coords.latitude,
@@ -162,7 +177,10 @@ export default function HomeScreen() {
     } catch { }
   }
 
-  const allVans: Van[] = [...supabaseVans, ...customVans];
+  const allVans: Van[] = useMemo(
+    () => [...supabaseVans, ...customVans],
+    [supabaseVans, customVans]
+  );
 
   const visibleVans = useMemo(() => {
     return allVans.filter((van) => {
@@ -180,25 +198,25 @@ export default function HomeScreen() {
     });
   }, [allVans]);
 
-  const foodCategories = useMemo(() => {
-    const discoveredCategories = new Set<string>();
+  const distanceMap = useMemo(() => {
+    const nextMap = new Map<string, number>();
+
+    if (!userLocation) return nextMap;
 
     visibleVans.forEach((van) => {
-      (van.foodCategories ?? []).forEach((category) => {
-        const cleaned = category.trim();
-        if (cleaned) {
-          discoveredCategories.add(cleaned);
-        }
-      });
+      nextMap.set(
+        van.id,
+        getDistanceMiles(
+          userLocation.latitude,
+          userLocation.longitude,
+          van.lat,
+          van.lng
+        )
+      );
     });
 
-    return [
-      "ALL",
-      ...Array.from(discoveredCategories).sort((a, b) =>
-        a.localeCompare(b)
-      ),
-    ];
-  }, [visibleVans]);
+    return nextMap;
+  }, [visibleVans, userLocation]);
 
   const filteredVans = useMemo(() => {
     let workingVans = [...visibleVans];
@@ -212,12 +230,6 @@ export default function HomeScreen() {
 
     if (selectedFilter === "FEATURED") {
       workingVans = workingVans.filter((van) => van.subscriptionTier === "pro");
-    }
-
-    if (selectedFoodCategory !== "ALL") {
-      workingVans = workingVans.filter((van) =>
-        matchesFoodCategory(van, selectedFoodCategory)
-      );
     }
 
     if (searchQuery.trim()) {
@@ -241,19 +253,8 @@ export default function HomeScreen() {
       }
 
       if (userLocation) {
-        const distanceA = getDistanceMiles(
-          userLocation.latitude,
-          userLocation.longitude,
-          a.lat,
-          a.lng
-        );
-
-        const distanceB = getDistanceMiles(
-          userLocation.latitude,
-          userLocation.longitude,
-          b.lat,
-          b.lng
-        );
+        const distanceA = distanceMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const distanceB = distanceMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
 
         if (Math.abs(distanceA - distanceB) > 0.05) {
           return distanceA - distanceB;
@@ -275,9 +276,9 @@ export default function HomeScreen() {
   }, [
     visibleVans,
     selectedFilter,
-    selectedFoodCategory,
     searchQuery,
     userLocation,
+    distanceMap,
   ]);
 
   const liveNowVans = useMemo(() => {
@@ -292,19 +293,8 @@ export default function HomeScreen() {
         const bRank = tierRank[b.subscriptionTier ?? "free"];
 
         if (userLocation) {
-          const distanceA = getDistanceMiles(
-            userLocation.latitude,
-            userLocation.longitude,
-            a.lat,
-            a.lng
-          );
-
-          const distanceB = getDistanceMiles(
-            userLocation.latitude,
-            userLocation.longitude,
-            b.lat,
-            b.lng
-          );
+          const distanceA = distanceMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+          const distanceB = distanceMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
 
           if (Math.abs(distanceA - distanceB) > 0.05) {
             return distanceA - distanceB;
@@ -318,26 +308,15 @@ export default function HomeScreen() {
         return b.rating - a.rating;
       })
       .slice(0, 6);
-  }, [visibleVans, userLocation]);
+  }, [visibleVans, userLocation, distanceMap]);
 
   const featuredProVans = useMemo(() => {
     return [...visibleVans]
       .filter((van) => van.subscriptionTier === "pro")
       .sort((a, b) => {
         if (userLocation) {
-          const distanceA = getDistanceMiles(
-            userLocation.latitude,
-            userLocation.longitude,
-            a.lat,
-            a.lng
-          );
-
-          const distanceB = getDistanceMiles(
-            userLocation.latitude,
-            userLocation.longitude,
-            b.lat,
-            b.lng
-          );
+          const distanceA = distanceMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+          const distanceB = distanceMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
 
           if (Math.abs(distanceA - distanceB) > 0.05) {
             return distanceA - distanceB;
@@ -347,20 +326,16 @@ export default function HomeScreen() {
         return b.rating - a.rating;
       })
       .slice(0, 4);
-  }, [visibleVans, userLocation]);
+  }, [visibleVans, userLocation, distanceMap]);
 
   function getVendorDistance(van: Van) {
     if (!userLocation) return null;
-
-    return getDistanceMiles(
-      userLocation.latitude,
-      userLocation.longitude,
-      van.lat,
-      van.lng
-    );
+    return distanceMap.get(van.id) ?? null;
   }
 
   function renderCompactLiveCard(van: Van) {
+    const vendorDistance = getVendorDistance(van);
+
     return (
       <Pressable
         key={`live-${van.id}`}
@@ -384,9 +359,9 @@ export default function HomeScreen() {
 
         <View style={styles.liveCardFooter}>
           <Text style={styles.liveCardRating}>★ {van.rating.toFixed(1)}</Text>
-          {getVendorDistance(van) !== null ? (
+          {vendorDistance !== null ? (
             <Text style={styles.liveCardDistance}>
-              {getVendorDistance(van)?.toFixed(1)} mi
+              {vendorDistance.toFixed(1)} mi
             </Text>
           ) : null}
         </View>
@@ -394,31 +369,9 @@ export default function HomeScreen() {
     );
   }
 
-  function renderFoodCategoryChip(category: string) {
-    const isActive = selectedFoodCategory === category;
-
-    return (
-      <Pressable
-        key={category}
-        style={[
-          styles.foodCategoryChip,
-          isActive && styles.foodCategoryChipActive,
-        ]}
-        onPress={() => setSelectedFoodCategory(category)}
-      >
-        <Text
-          style={[
-            styles.foodCategoryChipText,
-            isActive && styles.foodCategoryChipTextActive,
-          ]}
-        >
-          {category}
-        </Text>
-      </Pressable>
-    );
-  }
-
   function renderFeaturedVendorCard(van: Van) {
+    const vendorDistance = getVendorDistance(van);
+
     return (
       <Pressable
         key={`featured-${van.id}`}
@@ -428,9 +381,9 @@ export default function HomeScreen() {
         <View style={styles.featuredCardGlow} />
         <View style={styles.featuredCardHeader}>
           <Text style={styles.featuredCardBadge}>FEATURED</Text>
-          {getVendorDistance(van) !== null ? (
+          {vendorDistance !== null ? (
             <Text style={styles.featuredCardDistance}>
-              {getVendorDistance(van)?.toFixed(1)} mi
+              {vendorDistance.toFixed(1)} mi
             </Text>
           ) : null}
         </View>
@@ -453,13 +406,22 @@ export default function HomeScreen() {
     );
   }
 
-  const showEmptyState = filteredVans.length === 0;
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [selectedFilter, searchQuery]);
+
+  const visibleFilteredVans = filteredVans.slice(0, visibleCount);
+  const hasMoreVans = filteredVans.length > visibleCount;
+
+  const showEmptyState = !vendorsLoading && filteredVans.length === 0;
 
   return (
     <View style={styles.container}>
       <FlatList
-        data={filteredVans}
+        data={visibleFilteredVans}
         keyExtractor={(item) => item.id}
+        numColumns={2}
+        columnWrapperStyle={styles.vendorGridRow}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
@@ -496,7 +458,16 @@ export default function HomeScreen() {
               <View style={styles.aboutDivider} />
             </Animated.View>
 
-            {liveNowVans.length > 0 ? (
+            {vendorsLoading ? (
+              <View style={styles.loadingCard}>
+                <Text style={styles.loadingCardTitle}>Loading vendors...</Text>
+                <Text style={styles.loadingCardText}>
+                  Finding nearby food vans and preparing your home feed.
+                </Text>
+              </View>
+            ) : null}
+
+            {!vendorsLoading && liveNowVans.length > 0 ? (
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>Live Now</Text>
@@ -517,22 +488,22 @@ export default function HomeScreen() {
 
             <View style={styles.sectionBlock}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Browse by Food</Text>
+                <Text style={styles.sectionTitle}>Search Vendors</Text>
                 <Text style={styles.sectionSubtitle}>
-                  Find vendors by the food you want most
+                  Find vendors by name, cuisine, or food type
                 </Text>
               </View>
 
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.foodCategoryRow}
-              >
-                {foodCategories.map(renderFoodCategoryChip)}
-              </ScrollView>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search vendors, cuisines, or food..."
+                placeholderTextColor="rgba(255,255,255,0.6)"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
             </View>
 
-            {featuredProVans.length > 0 ? (
+            {!vendorsLoading && featuredProVans.length > 0 ? (
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>Featured Vendors</Text>
@@ -553,14 +524,6 @@ export default function HomeScreen() {
 
             <View style={styles.controlsCard}>
               <Text style={styles.controlsTitle}>Browse Vendors</Text>
-
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search van, vendor, cuisine, or food type"
-                placeholderTextColor="rgba(255,255,255,0.6)"
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
 
               <View style={styles.filterRow}>
                 {(["ALL", "LIVE NOW", "TOP RATED", "FEATURED"] as BrowseFilter[]).map(
@@ -606,18 +569,30 @@ export default function HomeScreen() {
             </View>
           ) : null
         }
+        ListFooterComponent={
+          hasMoreVans ? (
+            <Pressable
+              style={styles.loadMoreButton}
+              onPress={() => setVisibleCount((current) => current + 20)}
+            >
+              <Text style={styles.loadMoreButtonText}>Load More Vendors</Text>
+            </Pressable>
+          ) : null
+        }
         renderItem={({ item }) => (
-          <BurgerVanCard
-            id={item.id}
-            name={item.name}
-            cuisine={item.cuisine}
-            rating={item.rating}
-            isLive={item.isLive}
-            temporary={item.temporary}
-            distanceMiles={getVendorDistance(item)}
-            subscriptionTier={item.subscriptionTier}
-            vendorMessage={item.vendorMessage}
-          />
+          <View style={styles.vendorGridItem}>
+            <BurgerVanCard
+              id={item.id}
+              name={item.name}
+              cuisine={item.cuisine}
+              rating={item.rating}
+              isLive={item.isLive}
+              temporary={item.temporary}
+              distanceMiles={getVendorDistance(item)}
+              subscriptionTier={item.subscriptionTier}
+              vendorMessage={item.vendorMessage}
+            />
+          </View>
         )}
       />
     </View>
@@ -633,6 +608,13 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 20,
     paddingBottom: 40,
+  },
+  vendorGridRow: {
+    justifyContent: "space-between",
+  },
+  vendorGridItem: {
+    width: "48%",
+    marginBottom: 14,
   },
 
   heroWrap: {
@@ -686,6 +668,28 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     marginTop: 14,
     alignSelf: "center",
+  },
+
+  loadingCard: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+  },
+
+  loadingCardTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginBottom: 6,
+  },
+
+  loadingCardText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "rgba(255,255,255,0.72)",
   },
 
   sectionBlock: {
@@ -779,35 +783,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: theme.colors.background,
-  },
-
-  foodCategoryRow: {
-    paddingRight: 8,
-  },
-
-  foodCategoryChip: {
-    backgroundColor: "rgba(255,255,255,0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    marginRight: 10,
-  },
-
-  foodCategoryChipActive: {
-    backgroundColor: theme.colors.primary,
-    borderColor: theme.colors.primary,
-  },
-
-  foodCategoryChipText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-
-  foodCategoryChipTextActive: {
-    color: "#FFFFFF",
   },
 
   featuredCard: {
@@ -968,5 +943,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: "rgba(255,255,255,0.72)",
+  },
+
+  loadMoreButton: {
+    marginTop: 10,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+  },
+
+  loadMoreButtonText: {
+    color: theme.colors.background,
+    fontSize: 15,
+    fontWeight: "800",
   },
 });

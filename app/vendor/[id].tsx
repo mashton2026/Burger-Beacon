@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -15,6 +15,7 @@ import {
   isFreeTier,
   isProTier,
 } from "../../lib/subscriptionFeatures";
+import { ensureHttps } from "../../lib/url";
 import {
   getCurrentUser,
   getCurrentUserVendor,
@@ -89,34 +90,65 @@ export default function VendorScreen() {
     useState(false);
   const [userRating, setUserRating] = useState<number | null>(null);
   const [ratingCount, setRatingCount] = useState(0);
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
+  const [isTogglingLive, setIsTogglingLive] = useState(false);
+  const [isOpeningMenuPdf, setIsOpeningMenuPdf] = useState(false);
+  const [isOpeningDirections, setIsOpeningDirections] = useState(false);
+
+  const activeVendorIdRef = useRef(id);
+
+  function updateVanState(
+    updater: (previous: AssetAwareVan | null) => AssetAwareVan | null
+  ) {
+    setVan((previous) => {
+      const next = updater(previous);
+
+      if (next) {
+        vendorCache.set(id, next);
+      } else {
+        vendorCache.delete(id);
+      }
+
+      return next;
+    });
+  }
 
   useFocusEffect(
     useCallback(() => {
+      let isActive = true;
+      activeVendorIdRef.current = id;
+
       async function loadScreen() {
         setLoading(true);
 
         try {
-          const userId = await loadCurrentUser();
+          const userId = await loadCurrentUser(isActive);
 
-          // Load main content FIRST (fastest perceived load)
-          await loadVan(userId);
+          await loadVan(userId, isActive);
 
-          // Load everything else in background (no waiting)
-          loadUserRating(userId);
-          loadRatingCount();
-          checkIfFavourite(userId);
-          loadCurrentUserVendorState(userId);
+          void loadUserRating(userId, isActive);
+          void loadRatingCount(isActive);
+          void checkIfFavourite(userId, isActive);
+          void loadCurrentUserVendorState(userId, isActive);
         } finally {
-          setLoading(false);
+          if (isActive) {
+            setLoading(false);
+          }
         }
       }
 
-      loadScreen();
+      void loadScreen();
+
+      return () => {
+        isActive = false;
+      };
     }, [id])
   );
 
-  async function loadCurrentUser() {
+  async function loadCurrentUser(isActive: boolean) {
     const user = await getCurrentUser();
+
+    if (!isActive) return null;
 
     if (!user) {
       setCurrentUserId(null);
@@ -127,32 +159,43 @@ export default function VendorScreen() {
     return user.id;
   }
 
-  async function loadCurrentUserVendorState(userId?: string | null) {
+  async function loadCurrentUserVendorState(
+    userId?: string | null,
+    isActive = true
+  ) {
     try {
       if (!userId) {
-        setIsCurrentUserVendorAccount(false);
+        if (isActive) {
+          setIsCurrentUserVendorAccount(false);
+        }
         return;
       }
 
       const vendor = await getCurrentUserVendor();
+
+      if (!isActive) return;
+
       setIsCurrentUserVendorAccount(!!vendor);
     } catch {
-      setIsCurrentUserVendorAccount(false);
+      if (isActive) {
+        setIsCurrentUserVendorAccount(false);
+      }
     }
   }
 
-  async function loadVan(userId?: string | null) {
-    // 🚀 Instant cache load
-    if (vendorCache.has(id)) {
+  async function loadVan(userId?: string | null, isActive = true) {
+    if (vendorCache.has(id) && isActive) {
       setVan(vendorCache.get(id)!);
     }
 
     try {
       const vendor = (await getVendorById(id)) as AssetAwareVan | null;
 
+      if (!isActive) return;
 
       if (!vendor) {
         setVan(null);
+        vendorCache.delete(id);
         return;
       }
 
@@ -161,22 +204,25 @@ export default function VendorScreen() {
 
       void (async () => {
         try {
-          const uid = userId;
+          if (!userId) return;
 
-          if (uid) {
-            const canCount = await canCountVendorInteraction(
-              vendor.id,
-              uid,
-              "view",
-              1440
-            );
+          const canCount = await canCountVendorInteraction(
+            vendor.id,
+            userId,
+            "view",
+            1440
+          );
 
-            if (canCount) {
-              const nextViews = await incrementVendorViews(vendor.id);
-              await recordVendorInteraction(vendor.id, userId, "view");
-              setVan((prev) => (prev ? { ...prev, views: nextViews } : prev));
-            }
-          }
+          if (!canCount) return;
+
+          const nextViews = await incrementVendorViews(vendor.id);
+          await recordVendorInteraction(vendor.id, userId, "view");
+
+          if (!isActive || activeVendorIdRef.current !== vendor.id) return;
+
+          updateVanState((previous) =>
+            previous ? { ...previous, views: nextViews } : previous
+          );
         } catch (error) {
           console.log(
             "Error updating views:",
@@ -189,55 +235,87 @@ export default function VendorScreen() {
         "Error loading vendor:",
         error instanceof Error ? error.message : "Unknown error"
       );
-      setVan(null);
+
+      if (isActive) {
+        setVan(null);
+      }
     }
   }
 
-  async function loadUserRating(userId?: string | null) {
+  async function loadUserRating(userId?: string | null, isActive = true) {
     try {
       if (!userId) {
-        setUserRating(null);
+        if (isActive) {
+          setUserRating(null);
+        }
         return;
       }
 
       const rating = await getUserVendorRating(id, userId);
+
+      if (!isActive) return;
+
       setUserRating(rating);
     } catch {
-      setUserRating(null);
+      if (isActive) {
+        setUserRating(null);
+      }
     }
   }
 
-  async function loadRatingCount() {
+  async function loadRatingCount(isActive = true) {
     try {
       const count = await getVendorRatingCount(id);
+
+      if (!isActive) return;
+
       setRatingCount(count);
     } catch {
-      setRatingCount(0);
+      if (isActive) {
+        setRatingCount(0);
+      }
     }
   }
 
-  async function checkIfFavourite(userId?: string | null) {
+  async function checkIfFavourite(userId?: string | null, isActive = true) {
     try {
       if (!userId) {
-        setIsFavourite(false);
+        if (isActive) {
+          setIsFavourite(false);
+        }
         return;
       }
 
       const favourite = await isVendorFavourite(userId, id);
+
+      if (!isActive) return;
+
       setIsFavourite(favourite);
     } catch (error) {
       console.log(
         "Error checking favourite:",
         error instanceof Error ? error.message : "Unknown error"
       );
-      setIsFavourite(false);
+
+      if (isActive) {
+        setIsFavourite(false);
+      }
     }
   }
 
   async function toggleLive() {
-    if (!van) return;
+    if (!van || isTogglingLive) return;
+
+    if (!currentUserId || van.owner_id !== currentUserId) {
+      Alert.alert(
+        "Permission denied",
+        "Only the owner of this listing can change live status."
+      );
+      return;
+    }
 
     const newStatus = !van.isLive;
+    setIsTogglingLive(true);
 
     try {
       await setVendorLiveStatus(van.id, newStatus);
@@ -246,6 +324,11 @@ export default function VendorScreen() {
 
       if (updatedVan) {
         setVan(updatedVan);
+        vendorCache.set(id, updatedVan);
+      } else {
+        updateVanState((previous) =>
+          previous ? { ...previous, isLive: newStatus } : previous
+        );
       }
 
       Alert.alert(newStatus ? "Vendor is now LIVE" : "Vendor is now OFFLINE");
@@ -254,15 +337,18 @@ export default function VendorScreen() {
         "Error updating vendor status",
         error instanceof Error ? error.message : "Unknown error"
       );
+    } finally {
+      setIsTogglingLive(false);
     }
   }
 
   async function openDirections() {
-    if (!van) return;
+    if (!van || isOpeningDirections) return;
+
+    setIsOpeningDirections(true);
 
     try {
       const userId = await getCurrentUserId();
-
       let nextDirections: number | null = null;
 
       if (userId) {
@@ -282,8 +368,8 @@ export default function VendorScreen() {
       }
 
       if (nextDirections !== null) {
-        setVan((prev) =>
-          prev ? { ...prev, directions: nextDirections } : prev
+        updateVanState((previous) =>
+          previous ? { ...previous, directions: nextDirections } : previous
         );
       }
 
@@ -294,14 +380,20 @@ export default function VendorScreen() {
         "Error updating directions:",
         error instanceof Error ? error.message : "Unknown error"
       );
+    } finally {
+      setIsOpeningDirections(false);
     }
   }
 
   async function openMenuPdf() {
-    if (!van?.menuPdfUrl) {
-      Alert.alert("Menu unavailable", "This vendor has not uploaded a menu PDF.");
+    if (!van?.menuPdfUrl || isOpeningMenuPdf) {
+      if (!van?.menuPdfUrl) {
+        Alert.alert("Menu unavailable", "This vendor has not uploaded a menu PDF.");
+      }
       return;
     }
+
+    setIsOpeningMenuPdf(true);
 
     try {
       const freshUrl = await getVendorMenuPdfSignedUrl(van.menuPdfUrl);
@@ -314,11 +406,13 @@ export default function VendorScreen() {
       await Linking.openURL(freshUrl);
     } catch {
       Alert.alert("Open failed", "We could not open the menu PDF.");
+    } finally {
+      setIsOpeningMenuPdf(false);
     }
   }
 
   async function toggleFavourite() {
-    if (!van) return;
+    if (!van || isSavingFavourite) return;
 
     setIsSavingFavourite(true);
 
@@ -358,6 +452,38 @@ export default function VendorScreen() {
       );
     } finally {
       setIsSavingFavourite(false);
+    }
+  }
+
+  async function submitRating(star: number) {
+    if (isSubmittingRating) return;
+
+    setIsSubmittingRating(true);
+
+    try {
+      const userId = await getCurrentUserId();
+
+      if (!userId) {
+        Alert.alert("Login required", "Please log in to rate.");
+        return;
+      }
+
+      await upsertVendorRating(id, userId, star);
+      setUserRating(star);
+
+      const [nextAverage, nextCount] = await Promise.all([
+        refreshVendorRating(id),
+        getVendorRatingCount(id),
+      ]);
+
+      setRatingCount(nextCount);
+      updateVanState((previous) =>
+        previous ? { ...previous, rating: nextAverage } : previous
+      );
+    } catch {
+      Alert.alert("Error", "Failed to submit rating");
+    } finally {
+      setIsSubmittingRating(false);
     }
   }
 
@@ -412,6 +538,8 @@ export default function VendorScreen() {
 
   const isOwner = !!currentUserId && van.owner_id === currentUserId;
   const features = getSubscriptionFeatures(van.subscriptionTier);
+  const showSocials =
+    van.subscriptionTier === "growth" || van.subscriptionTier === "pro";
 
   const galleryPhotos =
     Array.isArray(van.photos) && van.photos.length > 0
@@ -430,8 +558,9 @@ export default function VendorScreen() {
         : "LISTED";
 
   const primaryVisual = van.logoUrl ?? galleryPhotos[0] ?? null;
-
   const showLogoSection = !!van.logoUrl;
+  const canShowSocialLinks =
+    van.subscriptionTier === "growth" || van.subscriptionTier === "pro";
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -450,6 +579,39 @@ export default function VendorScreen() {
 
             {primaryVisual ? (
               <Image source={{ uri: primaryVisual }} style={styles.heroVisual} />
+            ) : null}
+
+            {isProTier(van.subscriptionTier) &&
+              showSocials &&
+              (van.instagramUrl || van.facebookUrl || van.websiteUrl) ? (
+              <View style={styles.heroSocialRow}>
+                {van.instagramUrl ? (
+                  <Pressable
+                    style={styles.heroSocialButton}
+                    onPress={() => Linking.openURL(ensureHttps(van.instagramUrl!))}
+                  >
+                    <Text style={styles.heroSocialText}>📸</Text>
+                  </Pressable>
+                ) : null}
+
+                {van.facebookUrl ? (
+                  <Pressable
+                    style={styles.heroSocialButton}
+                    onPress={() => Linking.openURL(ensureHttps(van.facebookUrl!))}
+                  >
+                    <Text style={styles.heroSocialText}>📘</Text>
+                  </Pressable>
+                ) : null}
+
+                {van.websiteUrl ? (
+                  <Pressable
+                    style={styles.heroSocialButton}
+                    onPress={() => Linking.openURL(ensureHttps(van.websiteUrl!))}
+                  >
+                    <Text style={styles.heroSocialText}>🌐</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             ) : null}
           </View>
 
@@ -575,9 +737,7 @@ export default function VendorScreen() {
           <View style={styles.brandCard}>
             <Image source={{ uri: van.logoUrl! }} style={styles.brandLogo} />
             <View style={styles.brandTextWrap}>
-              <Text style={styles.brandTitle}>
-                {van.vendorName || van.name}
-              </Text>
+              <Text style={styles.brandTitle}>{van.vendorName || van.name}</Text>
               <Text style={styles.brandText}>
                 This vendor has added branded profile assets through BiteBeacon.
               </Text>
@@ -609,7 +769,51 @@ export default function VendorScreen() {
       <View style={styles.sectionBlock}>
         <Text style={styles.sectionTitle}>Vendor</Text>
         <View style={styles.infoCard}>
-          <Text style={styles.infoText}>{van.vendorName || "Vendor name coming soon"}</Text>
+          <Text style={styles.infoText}>
+            {van.vendorName || "Vendor name coming soon"}
+          </Text>
+
+          {showSocials && (
+            <View style={styles.socialRow}>
+              {van.instagramUrl ? (
+                <Pressable
+                  style={styles.socialButton}
+                  onPress={() => Linking.openURL(ensureHttps(van.instagramUrl!))}
+                >
+                  <Text style={styles.socialText}>📸 Instagram</Text>
+                </Pressable>
+              ) : null}
+
+              {van.facebookUrl ? (
+                <Pressable
+                  style={styles.socialButton}
+                  onPress={() => Linking.openURL(ensureHttps(van.facebookUrl!))}
+                >
+                  <Text style={styles.socialText}>📘 Facebook</Text>
+                </Pressable>
+              ) : null}
+
+              {van.websiteUrl ? (
+                <Pressable
+                  style={styles.socialButton}
+                  onPress={() => Linking.openURL(ensureHttps(van.websiteUrl!))}
+                >
+                  <Text style={styles.socialText}>🌐 Website</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+
+          {isOwner && isFreeTier(van.subscriptionTier) ? (
+            <Pressable
+              style={styles.socialUpgradeHint}
+              onPress={() => router.push("/vendor/upgrade")}
+            >
+              <Text style={styles.socialUpgradeHintText}>
+                Upgrade to Growth or Pro to display social links on your listing.
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
@@ -620,9 +824,18 @@ export default function VendorScreen() {
         </View>
 
         {van.menuPdfName ? (
-          <Pressable style={styles.secondaryButton} onPress={openMenuPdf}>
+          <Pressable
+            style={[
+              styles.secondaryButton,
+              isOpeningMenuPdf && styles.disabledButton,
+            ]}
+            onPress={openMenuPdf}
+            disabled={isOpeningMenuPdf}
+          >
             <Text style={styles.secondaryButtonText}>
-              View Menu PDF{van.menuPdfName ? ` (${van.menuPdfName})` : ""}
+              {isOpeningMenuPdf
+                ? "Opening menu..."
+                : `View Menu PDF${van.menuPdfName ? ` (${van.menuPdfName})` : ""}`}
             </Text>
           </Pressable>
         ) : null}
@@ -637,6 +850,45 @@ export default function VendorScreen() {
         </View>
       </View>
 
+      {van.what3words &&
+        (van.subscriptionTier === "growth" || van.subscriptionTier === "pro") && (
+          <View style={styles.sectionBlock}>
+            <Text style={styles.sectionTitle}>Precise Location</Text>
+
+            <View style={styles.infoCard}>
+              <Text style={styles.infoText}>
+        ///{van.what3words}
+              </Text>
+
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={() =>
+                  Linking.openURL(`https://what3words.com/${van.what3words}`)
+                }
+              >
+                <Text style={styles.secondaryButtonText}>
+                  Open in what3words
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+      {isOwner && isFreeTier(van.subscriptionTier) ? (
+        <View style={styles.sectionBlock}>
+          <View style={styles.infoCard}>
+            <Pressable
+              style={styles.socialUpgradeHint}
+              onPress={() => router.push("/vendor/upgrade")}
+            >
+              <Text style={styles.socialUpgradeHintText}>
+                Upgrade to Growth or Pro to display what3words on your listing.
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
       {!isOwner ? (
         <View style={styles.sectionBlock}>
           <Text style={styles.sectionTitle}>Rate this vendor</Text>
@@ -645,27 +897,9 @@ export default function VendorScreen() {
             {[1, 2, 3, 4, 5].map((star) => (
               <Pressable
                 key={star}
-                onPress={async () => {
-                  try {
-                    const userId = await getCurrentUserId();
-
-                    if (!userId) {
-                      Alert.alert("Login required", "Please log in to rate.");
-                      return;
-                    }
-
-                    await upsertVendorRating(id, userId, star);
-                    setUserRating(star);
-
-                    const nextAverage = await refreshVendorRating(id);
-                    const nextCount = await getVendorRatingCount(id);
-
-                    setRatingCount(nextCount);
-                    setVan((prev) => (prev ? { ...prev, rating: nextAverage } : prev));
-                  } catch {
-                    Alert.alert("Error", "Failed to submit rating");
-                  }
-                }}
+                onPress={() => submitRating(star)}
+                disabled={isSubmittingRating}
+                style={isSubmittingRating ? styles.disabledButton : undefined}
               >
                 <Text style={styles.ratingStar}>
                   {userRating && star <= userRating ? "★" : "☆"}
@@ -687,17 +921,32 @@ export default function VendorScreen() {
                   style={[
                     styles.primaryButton,
                     van.isLive ? styles.liveActiveButton : styles.liveInactiveButton,
+                    isTogglingLive && styles.disabledButton,
                   ]}
                   onPress={toggleLive}
+                  disabled={isTogglingLive}
                 >
                   <Text style={styles.primaryButtonText}>
-                    {van.isLive ? "LIVE NOW" : "GO LIVE"}
+                    {isTogglingLive
+                      ? "Updating..."
+                      : van.isLive
+                        ? "LIVE NOW"
+                        : "GO LIVE"}
                   </Text>
                 </Pressable>
               ) : null}
 
-              <Pressable style={styles.darkButton} onPress={openDirections}>
-                <Text style={styles.darkButtonText}>Get Directions</Text>
+              <Pressable
+                style={[
+                  styles.darkButton,
+                  isOpeningDirections && styles.disabledButton,
+                ]}
+                onPress={openDirections}
+                disabled={isOpeningDirections}
+              >
+                <Text style={styles.darkButtonText}>
+                  {isOpeningDirections ? "Opening..." : "Get Directions"}
+                </Text>
               </Pressable>
 
               <Pressable
@@ -715,8 +964,17 @@ export default function VendorScreen() {
           ) : van.listingSource === "user_spotted" &&
             !(van.expiresAt && new Date(van.expiresAt) < new Date()) ? (
             <>
-              <Pressable style={styles.darkButton} onPress={openDirections}>
-                <Text style={styles.darkButtonText}>Get Directions</Text>
+              <Pressable
+                style={[
+                  styles.darkButton,
+                  isOpeningDirections && styles.disabledButton,
+                ]}
+                onPress={openDirections}
+                disabled={isOpeningDirections}
+              >
+                <Text style={styles.darkButtonText}>
+                  {isOpeningDirections ? "Opening..." : "Get Directions"}
+                </Text>
               </Pressable>
 
               <Pressable style={styles.orangeButton} onPress={openClaimScreen}>
@@ -737,8 +995,17 @@ export default function VendorScreen() {
             </>
           ) : (
             <>
-              <Pressable style={styles.darkButton} onPress={openDirections}>
-                <Text style={styles.darkButtonText}>Get Directions</Text>
+              <Pressable
+                style={[
+                  styles.darkButton,
+                  isOpeningDirections && styles.disabledButton,
+                ]}
+                onPress={openDirections}
+                disabled={isOpeningDirections}
+              >
+                <Text style={styles.darkButtonText}>
+                  {isOpeningDirections ? "Opening..." : "Get Directions"}
+                </Text>
               </Pressable>
 
               <Pressable
@@ -1372,5 +1639,64 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 11,
     fontWeight: "800",
+  },
+
+  socialRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 12,
+  },
+
+  socialButton: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#FF7A00",
+  },
+
+  socialText: {
+    color: "#0B2A5B",
+    fontWeight: "700",
+  },
+
+  heroSocialRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+  },
+
+  heroSocialButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#FF7A00",
+  },
+
+  heroSocialText: {
+    fontSize: 16,
+  },
+
+  socialUpgradeHint: {
+    marginTop: 12,
+    backgroundColor: "rgba(255,122,0,0.12)",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: ORANGE,
+  },
+
+  socialUpgradeHintText: {
+    color: ORANGE_SOFT,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
   },
 });

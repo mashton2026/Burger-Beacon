@@ -20,10 +20,33 @@ export default function VendorSignupScreen() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isSigningUp, setIsSigningUp] = useState(false);
 
   async function handleSignup() {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert("Missing details", "Please enter email and password.");
+    if (isSigningUp) return;
+
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedEmail || !password.trim() || !confirmPassword.trim()) {
+      Alert.alert(
+        "Missing details",
+        "Please enter your email, password, and confirmation password."
+      );
+      return;
+    }
+
+    const emailIsValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
+
+    if (!emailIsValid) {
+      Alert.alert("Invalid email", "Please enter a valid email address.");
+      return;
+    }
+
+    if (password.length < 6) {
+      Alert.alert(
+        "Password too short",
+        "Please use at least 6 characters for your password."
+      );
       return;
     }
 
@@ -32,28 +55,41 @@ export default function VendorSignupScreen() {
       return;
     }
 
-    const { error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-    });
+    setIsSigningUp(true);
 
-    if (error) {
-      Alert.alert("Sign up failed", error.message);
-      return;
-    }
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: trimmedEmail,
+        password,
+      });
 
-    const user = await getCurrentUser();
+      if (error) {
+        Alert.alert("Sign up failed", error.message);
+        return;
+      }
 
-    if (!user) {
+      const user = await getCurrentUser();
+
+      // If email confirmation is ON → user will be null
+      if (!user) {
+        Alert.alert(
+          "Check your email 📩",
+          "We’ve sent you a confirmation link. Please check your inbox (and spam) to activate your account before logging in."
+        );
+        router.replace("/auth/login");
+        return;
+      }
+
+      // If email confirmation is OFF (fallback)
+      router.replace("/vendor/claim-select");
+    } catch (error) {
       Alert.alert(
-        "Account created",
-        "Your vendor account was created. Please log in."
+        "Sign up failed",
+        error instanceof Error ? error.message : "Unknown error"
       );
-      router.replace("/auth/login");
-      return;
+    } finally {
+      setIsSigningUp(false);
     }
-
-    router.replace("/vendor/claim-select");
   }
 
   return (
@@ -67,7 +103,6 @@ export default function VendorSignupScreen() {
         keyboardDismissMode="interactive"
         showsVerticalScrollIndicator={false}
       >
-
         <View style={styles.heroBlock}>
           <Text style={styles.kicker}>CREATE ACCOUNT</Text>
           <Text style={styles.title}>Start your vendor journey</Text>
@@ -85,12 +120,14 @@ export default function VendorSignupScreen() {
             placeholder="Enter your email"
             placeholderTextColor="#7A7A7A"
             autoCapitalize="none"
+            autoCorrect={false}
             keyboardType="email-address"
             autoComplete="email"
             textContentType="emailAddress"
             importantForAutofill="yes"
             value={email}
             onChangeText={setEmail}
+            editable={!isSigningUp}
           />
 
           <Text style={styles.label}>Password</Text>
@@ -105,8 +142,14 @@ export default function VendorSignupScreen() {
               importantForAutofill="yes"
               value={password}
               onChangeText={setPassword}
+              editable={!isSigningUp}
             />
-            <Pressable onPress={() => setShowPassword(!showPassword)}>
+
+            <Pressable
+              onPress={() => setShowPassword((current) => !current)}
+              disabled={isSigningUp}
+              style={isSigningUp ? styles.buttonDisabled : undefined}
+            >
               <Text style={styles.showText}>
                 {showPassword ? "Hide" : "Show"}
               </Text>
@@ -124,17 +167,28 @@ export default function VendorSignupScreen() {
             importantForAutofill="yes"
             value={confirmPassword}
             onChangeText={setConfirmPassword}
+            editable={!isSigningUp}
           />
 
-          <Pressable style={styles.primaryButton} onPress={handleSignup}>
+          <Pressable
+            style={[styles.primaryButton, isSigningUp && styles.buttonDisabled]}
+            onPress={handleSignup}
+            disabled={isSigningUp}
+          >
             <Text style={styles.primaryButtonText}>
-              Create Vendor Account
+              {isSigningUp ? "Creating Account..." : "Create Vendor Account"}
             </Text>
           </Pressable>
 
+          <Text style={styles.confirmationHint}>
+            After signup, we will send a confirmation email to your inbox. Please also
+            check spam or junk.
+          </Text>
+
           <Pressable
-            style={styles.secondaryButton}
+            style={[styles.secondaryButton, isSigningUp && styles.buttonDisabled]}
             onPress={() => router.replace("/auth/login")}
+            disabled={isSigningUp}
           >
             <Text style={styles.secondaryButtonText}>Back to Login</Text>
           </Pressable>
@@ -149,37 +203,31 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-
   scrollContent: {
     flexGrow: 1,
     justifyContent: "center",
     padding: 24,
     paddingBottom: 160,
   },
-
   heroBlock: {
     marginBottom: 24,
   },
-
   kicker: {
     fontSize: 12,
     fontWeight: "800",
     color: theme.colors.secondary,
     marginBottom: 8,
   },
-
   title: {
     fontSize: 34,
     fontWeight: "800",
     color: theme.colors.textOnDark,
     marginBottom: 8,
   },
-
   subtitle: {
     fontSize: 15,
     color: "rgba(255,255,255,0.78)",
   },
-
   card: {
     backgroundColor: theme.colors.card,
     borderRadius: 24,
@@ -187,20 +235,17 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: theme.colors.border,
   },
-
   sectionTitle: {
     fontSize: 22,
     fontWeight: "800",
     color: theme.colors.background,
     marginBottom: 16,
   },
-
   label: {
     fontWeight: "700",
     marginBottom: 6,
     color: theme.colors.background,
   },
-
   input: {
     borderWidth: 2,
     borderColor: theme.colors.border,
@@ -208,8 +253,8 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
     backgroundColor: "#fff",
+    color: theme.colors.text,
   },
-
   passwordWrap: {
     flexDirection: "row",
     borderWidth: 2,
@@ -221,17 +266,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     backgroundColor: "#fff",
   },
-
   passwordInput: {
     flex: 1,
     paddingVertical: 12,
+    color: theme.colors.text,
   },
-
   showText: {
     color: theme.colors.primary,
     fontWeight: "700",
   },
-
   primaryButton: {
     backgroundColor: theme.colors.background,
     padding: 14,
@@ -239,12 +282,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 10,
   },
-
   primaryButtonText: {
     color: "#fff",
     fontWeight: "800",
   },
-
   secondaryButton: {
     backgroundColor: theme.colors.primary,
     padding: 14,
@@ -252,9 +293,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 10,
   },
-
   secondaryButtonText: {
     color: "#fff",
     fontWeight: "800",
+  },
+
+  confirmationHint: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 19,
+    color: theme.colors.background,
+    textAlign: "center",
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });

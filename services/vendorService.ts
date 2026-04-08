@@ -12,6 +12,11 @@ type CreateVendorInput = {
   schedule: string;
   lat: number;
   lng: number;
+  instagramUrl?: string;
+  facebookUrl?: string;
+  websiteUrl?: string;
+  what3words?: string | null;
+  isApproved?: boolean;
   photo?: string | null;
   photos?: string[];
   logoUrl?: string | null;
@@ -52,7 +57,49 @@ export async function getAllVendors(): Promise<Van[]> {
     .from("vendors")
     .select("*")
     .eq("is_suspended", false)
-    .or("listing_source.eq.admin_seeded,and(listing_source.eq.user_spotted,expires_at.is.null),and(listing_source.eq.user_spotted,expires_at.gte.now())");
+    .or(
+      "listing_source.eq.admin_seeded,and(listing_source.eq.user_spotted,expires_at.is.null),and(listing_source.eq.user_spotted,expires_at.gte.now())"
+    );
+
+  if (error) throw new Error(error.message);
+
+  const vendors = data ?? [];
+
+  const spottedVendorIds = vendors
+    .filter((vendor) => vendor.listing_source === "user_spotted")
+    .map((vendor) => String(vendor.id));
+
+  if (spottedVendorIds.length === 0) {
+    return mapVendorRowsToVans(vendors);
+  }
+
+  const { data: confirmations, error: confirmationsError } = await supabase
+    .from("vendor_confirmations")
+    .select("vendor_id");
+
+  if (confirmationsError) throw new Error(confirmationsError.message);
+
+  const confirmationCounts = new Map<string, number>();
+
+  for (const confirmation of confirmations ?? []) {
+    const vendorId = String(confirmation.vendor_id);
+    confirmationCounts.set(vendorId, (confirmationCounts.get(vendorId) ?? 0) + 1);
+  }
+
+  const filteredVendors = vendors.filter((vendor) => {
+    if (vendor.listing_source !== "user_spotted") return true;
+
+    const confirmationCount = confirmationCounts.get(String(vendor.id)) ?? 0;
+    return confirmationCount >= 2;
+  });
+
+  return mapVendorRowsToVans(filteredVendors);
+}
+
+export async function getAllVendorsForAdmin(): Promise<Van[]> {
+  const { data, error } = await supabase
+    .from("vendors")
+    .select("*");
 
   if (error) throw new Error(error.message);
 
@@ -60,6 +107,8 @@ export async function getAllVendors(): Promise<Van[]> {
 }
 
 export async function getVendorById(id: string): Promise<Van | null> {
+  if (!id?.trim()) return null;
+
   const { data, error } = await supabase
     .from("vendors")
     .select("*")
@@ -74,6 +123,8 @@ export async function getVendorById(id: string): Promise<Van | null> {
 }
 
 export async function getVendorByOwnerId(ownerId: string): Promise<Van | null> {
+  if (!ownerId?.trim()) return null;
+
   const { data, error } = await supabase
     .from("vendors")
     .select("*")
@@ -89,35 +140,91 @@ export async function getVendorByOwnerId(ownerId: string): Promise<Van | null> {
 }
 
 export async function createVendor(input: CreateVendorInput): Promise<void> {
-  const { error } = await supabase.from("vendors").insert({
-    id: input.id,
-    name: input.name,
-    vendor_name: input.vendorName,
-    cuisine: input.cuisine,
-    menu: input.menu,
-    schedule: input.schedule,
-    lat: input.lat,
-    lng: input.lng,
-    rating: input.rating ?? 0,
-    temporary: input.temporary ?? false,
-    listing_source: input.listingSource ?? "admin_seeded",
-    expires_at: input.expiresAt ?? null,
-    photo: input.photo ?? input.photos?.[0] ?? null,
-    photos: input.photos ?? (input.photo ? [input.photo] : []),
-    logo_url: input.logoUrl ?? null,
-    logo_path: input.logoPath ?? null,
-    menu_pdf_url: input.menuPdfUrl ?? null,
-    menu_pdf_name: input.menuPdfName ?? null,
-    is_live: input.isLive ?? false,
-    owner_id: input.owner_id ?? null,
-    spotted_by: input.spottedBy ?? null,
-    views: input.views ?? 0,
-    directions: input.directions ?? 0,
-    subscription_tier: input.subscriptionTier ?? "free",
-    food_categories: input.foodCategories ?? [],
-  });
+
+  // Step 3: Check for existing nearby spotted vendor
+  if ((input.listingSource ?? "admin_seeded") === "user_spotted") {
+    const radius = 0.001; // ~100m
+
+    const { data: existing } = await supabase
+      .from("vendors")
+      .select("id, name, lat, lng")
+      .eq("listing_source", "user_spotted")
+      .gte("lat", input.lat - radius)
+      .lte("lat", input.lat + radius)
+      .gte("lng", input.lng - radius)
+      .lte("lng", input.lng + radius);
+
+    if (existing && existing.length > 0) {
+      const normalizedInputName = input.name.trim().toLowerCase();
+
+      const match = existing.find((v) =>
+        v.name?.trim().toLowerCase() === normalizedInputName
+      );
+
+      if (match && input.spottedBy) {
+        // Add confirmation instead of creating new vendor
+        const { error: confirmationError } = await supabase
+          .from("vendor_confirmations")
+          .insert({
+            vendor_id: match.id,
+            user_id: input.spottedBy,
+          });
+
+        if (confirmationError) throw new Error(confirmationError.message);
+
+        return; // STOP here, do not create duplicate vendor
+      }
+    }
+  }
+  const { data, error } = await supabase
+    .from("vendors")
+    .insert({
+      id: input.id,
+      name: input.name,
+      vendor_name: input.vendorName,
+      cuisine: input.cuisine,
+      menu: input.menu,
+      schedule: input.schedule,
+      lat: input.lat,
+      lng: input.lng,
+      rating: input.rating ?? 0,
+      temporary: input.temporary ?? false,
+      listing_source: input.listingSource ?? "admin_seeded",
+      expires_at: input.expiresAt ?? null,
+      isApproved: input.isApproved ?? true,
+      photo: input.photo ?? input.photos?.[0] ?? null,
+      photos: input.photos ?? (input.photo ? [input.photo] : []),
+      logo_url: input.logoUrl ?? null,
+      logo_path: input.logoPath ?? null,
+      menu_pdf_url: input.menuPdfUrl ?? null,
+      menu_pdf_name: input.menuPdfName ?? null,
+      is_live: input.isLive ?? false,
+      owner_id: input.owner_id ?? null,
+      spotted_by: input.spottedBy ?? null,
+      views: input.views ?? 0,
+      directions: input.directions ?? 0,
+      subscription_tier: input.subscriptionTier ?? "free",
+      food_categories: input.foodCategories ?? [],
+      what3words: input.what3words ?? null,
+      instagram_url: input.instagramUrl ?? null,
+      facebook_url: input.facebookUrl ?? null,
+      website_url: input.websiteUrl ?? null,
+    })
+    .select()
+    .single();
 
   if (error) throw new Error(error.message);
+
+  if ((input.listingSource ?? "admin_seeded") === "user_spotted" && data?.id && input.spottedBy) {
+    const { error: confirmationError } = await supabase
+      .from("vendor_confirmations")
+      .insert({
+        vendor_id: data.id,
+        user_id: input.spottedBy,
+      });
+
+    if (confirmationError) throw new Error(confirmationError.message);
+  }
 }
 
 export async function createOwnedVendor(input: {
@@ -148,6 +255,7 @@ export async function createOwnedVendor(input: {
     lng: input.lng,
     temporary: false,
     listingSource: "admin_seeded",
+    isApproved: false,
     isLive: false,
     owner_id: user.id,
     subscriptionTier: "free",
@@ -159,6 +267,10 @@ export async function updateVendor(
   id: string,
   input: UpdateVendorInput
 ): Promise<void> {
+  if (!id?.trim()) {
+    throw new Error("Vendor id is required.");
+  }
+
   const updates: Record<string, unknown> = {};
 
   if (input.name !== undefined) updates.name = input.name;
@@ -177,7 +289,9 @@ export async function updateVendor(
   if (input.menuPdfUrl !== undefined) updates.menu_pdf_url = input.menuPdfUrl;
   if (input.menuPdfName !== undefined) updates.menu_pdf_name = input.menuPdfName;
   if (input.isLive !== undefined) updates.is_live = input.isLive;
-  if (input.foodCategories !== undefined) updates.food_categories = input.foodCategories;
+  if (input.foodCategories !== undefined) {
+    updates.food_categories = input.foodCategories;
+  }
 
   const { error } = await supabase.from("vendors").update(updates).eq("id", id);
 
@@ -185,6 +299,10 @@ export async function updateVendor(
 }
 
 export async function deleteVendor(id: string): Promise<void> {
+  if (!id?.trim()) {
+    throw new Error("Vendor id is required.");
+  }
+
   const { error } = await supabase.from("vendors").delete().eq("id", id);
   if (error) throw new Error(error.message);
 }
@@ -193,6 +311,10 @@ export async function updateVendorSubscriptionTier(
   id: string,
   tier: "free" | "growth" | "pro"
 ): Promise<void> {
+  if (!id?.trim()) {
+    throw new Error("Vendor id is required.");
+  }
+
   const updates =
     tier === "free"
       ? { subscription_tier: tier, is_live: false }
@@ -210,6 +332,10 @@ export async function setVendorLiveStatus(
   id: string,
   isLive: boolean
 ): Promise<void> {
+  if (!id?.trim()) {
+    throw new Error("Vendor id is required.");
+  }
+
   const { error } = await supabase
     .from("vendors")
     .update({ is_live: isLive })
@@ -258,6 +384,8 @@ async function incrementVendorCounter(
 }
 
 export async function incrementVendorViews(id: string): Promise<number> {
+  if (!id?.trim()) return 0;
+
   const { data, error } = await supabase.rpc("increment_vendor_views", {
     p_vendor_id: id,
   });
@@ -268,6 +396,8 @@ export async function incrementVendorViews(id: string): Promise<number> {
 }
 
 export async function incrementVendorDirections(id: string): Promise<number> {
+  if (!id?.trim()) return 0;
+
   const { data, error } = await supabase.rpc("increment_vendor_directions", {
     p_vendor_id: id,
   });
@@ -347,7 +477,7 @@ export async function adminDeleteVendor(vendorId: string) {
 export async function rewardScoutPointForClaim(vendorId: string): Promise<void> {
   const { data: vendor, error: vendorError } = await supabase
     .from("vendors")
-    .select("id, spotted_by, owner_id, rewarded_for_claim")
+    .select("id, owner_id, rewarded_for_claim")
     .eq("id", vendorId)
     .maybeSingle();
 
@@ -357,55 +487,77 @@ export async function rewardScoutPointForClaim(vendorId: string): Promise<void> 
 
   if (!vendor) return;
 
-  const spottedBy = (vendor as {
-    spotted_by?: string | null;
-    owner_id?: string | null;
-    rewarded_for_claim?: boolean | null;
-  }).spotted_by;
-
   const ownerId = (vendor as {
-    spotted_by?: string | null;
     owner_id?: string | null;
     rewarded_for_claim?: boolean | null;
   }).owner_id;
 
   const rewardedForClaim = (vendor as {
-    spotted_by?: string | null;
     owner_id?: string | null;
     rewarded_for_claim?: boolean | null;
   }).rewarded_for_claim;
 
-  if (!spottedBy) return;
   if (!ownerId) return;
   if (rewardedForClaim) return;
-  if (spottedBy === ownerId) return;
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("scout_points")
-    .eq("id", spottedBy)
-    .maybeSingle();
+  const { data: confirmations, error: confirmationsError } = await supabase
+    .from("vendor_confirmations")
+    .select("user_id")
+    .eq("vendor_id", vendorId);
 
-  if (profileError) {
-    throw new Error(profileError.message);
+  if (confirmationsError) {
+    throw new Error(confirmationsError.message);
   }
 
-  const currentPoints = Number(
-    (profile as { scout_points?: number | null } | null)?.scout_points ?? 0
+  const uniqueUserIds = Array.from(
+    new Set(
+      (confirmations ?? [])
+        .map((confirmation) => confirmation.user_id)
+        .filter((userId): userId is string => !!userId && userId !== ownerId)
+    )
   );
 
-  const { error: upsertError } = await supabase.from("profiles").upsert(
-    {
-      id: spottedBy,
-      scout_points: currentPoints + 1,
-    },
-    {
-      onConflict: "id",
+  if (uniqueUserIds.length === 0) {
+    const { error: rewardFlagError } = await supabase
+      .from("vendors")
+      .update({ rewarded_for_claim: true })
+      .eq("id", vendorId);
+
+    if (rewardFlagError) {
+      throw new Error(rewardFlagError.message);
     }
-  );
 
-  if (upsertError) {
-    throw new Error(upsertError.message);
+    return;
+  }
+
+  for (const userId of uniqueUserIds) {
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("scout_points")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profileError) {
+      throw new Error(profileError.message);
+    }
+
+    const currentPoints = Number(
+      (profile as { scout_points?: number | null } | null)?.scout_points ?? 0
+    );
+
+    const { error: upsertError } = await supabase.from("profiles").upsert(
+      {
+        id: userId,
+        scout_points: currentPoints + 1,
+      },
+      {
+        onConflict: "id",
+      }
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message);
+    }
   }
 
   const { error: rewardFlagError } = await supabase
@@ -446,7 +598,6 @@ export async function canCountVendorInteraction(
   return !data;
 }
 
-
 export async function recordVendorInteraction(
   vendorId: string,
   userId: string,
@@ -473,7 +624,6 @@ export async function recordVendorInteraction(
         lat = location.coords.latitude;
         lng = location.coords.longitude;
       }
-
     } catch {
       // fail silently
     }
@@ -549,4 +699,13 @@ export async function refreshVendorRating(
 
   if (error) throw new Error(error.message);
   return Number(data ?? 0);
+}
+
+export async function approveVendor(vendorId: string): Promise<void> {
+  const { error } = await supabase
+    .from("vendors")
+    .update({ isApproved: true }) // ✅ CORRECT
+    .eq("id", vendorId);
+
+  if (error) throw new Error(error.message);
 }

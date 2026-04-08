@@ -22,8 +22,11 @@ export default function UserSignupScreen() {
   const [showPassword, setShowPassword] = useState(false);
 
   async function handleSignup() {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert("Missing details", "Please enter email and password.");
+    if (!email.trim() || !password.trim() || !confirmPassword.trim()) {
+      Alert.alert(
+        "Missing details",
+        "Please enter your email, password, and confirmation password."
+      );
       return;
     }
 
@@ -33,7 +36,7 @@ export default function UserSignupScreen() {
     }
 
     const { error } = await supabase.auth.signUp({
-      email: email.trim(),
+      email: email.trim().toLowerCase(),
       password,
     });
 
@@ -42,8 +45,12 @@ export default function UserSignupScreen() {
       return;
     }
 
-    Alert.alert("Account created", "Your account has been created.");
-    router.replace("/(tabs)/account");
+    Alert.alert(
+      "Check your email 📩",
+      "We’ve sent you a confirmation email from BiteBeacon. Please check your inbox (and spam) and confirm your account before logging in."
+    );
+
+    router.replace("/auth/user-login");
   }
 
   return (

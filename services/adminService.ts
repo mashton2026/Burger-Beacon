@@ -4,13 +4,13 @@ import { getCurrentUser } from "./authService";
 export async function isCurrentUserAdmin(): Promise<boolean> {
     const user = await getCurrentUser();
 
-    if (!user) {
+    if (!user?.id) {
         return false;
     }
 
     const { data, error } = await supabase
         .from("admin_users")
-        .select("user_id, is_active")
+        .select("user_id")
         .eq("user_id", user.id)
         .eq("is_active", true)
         .maybeSingle();
@@ -19,5 +19,5 @@ export async function isCurrentUserAdmin(): Promise<boolean> {
         throw new Error(error.message);
     }
 
-    return !!data;
+    return Boolean(data);
 }

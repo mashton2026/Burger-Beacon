@@ -89,7 +89,7 @@ const SOFT_ORANGE_BG = "#FFF4E8";
 const SOFT_ORANGE_BORDER = "#FFD1A6";
 const DARK_TEXT = "#0B2A5B";
 
-const FOOD_CATEGORY_OPTIONS = [
+const DEFAULT_FOOD_CATEGORY_SUGGESTIONS = [
   "Burgers",
   "Smash Burgers",
   "Fries",
@@ -116,6 +116,32 @@ const FOOD_CATEGORY_OPTIONS = [
   "Coffee",
   "Drinks",
   "Breakfast",
+  "Greek",
+  "Turkish",
+  "Middle Eastern",
+  "Persian",
+  "Thai",
+  "Chinese",
+  "Japanese",
+  "Korean",
+  "Filipino",
+  "Vietnamese",
+  "Street Food",
+  "Steak",
+  "Grill",
+  "Peri Peri",
+  "Rotisserie",
+  "Wings",
+  "Loaded Wraps",
+  "Loaded Nachos",
+  "Quesadillas",
+  "Burritos",
+  "Milkshakes",
+  "Smoothies",
+  "Bubble Tea",
+  "Waffles",
+  "Churros",
+  "Sweet Treats",
 ];
 
 function isLocalFileUri(uri: string) {
@@ -285,6 +311,10 @@ export default function VendorDashboardScreen() {
   const [vendorMessage, setVendorMessage] = useState("");
   const [isLive, setIsLive] = useState(false);
   const [foodCategories, setFoodCategories] = useState<string[]>([]);
+  const [instagram, setInstagram] = useState("");
+  const [facebook, setFacebook] = useState("");
+  const [website, setWebsite] = useState("");
+  const [what3words, setWhat3words] = useState("");
   const [foodCategorySearch, setFoodCategorySearch] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
   const [logoUri, setLogoUri] = useState<string | null>(null);
@@ -546,6 +576,10 @@ export default function VendorDashboardScreen() {
       setVendorMessage(vendor.vendorMessage ?? "");
       setIsLive(vendor.isLive);
       setFoodCategories(vendor.foodCategories ?? []);
+      setInstagram((vendor as any).instagram ?? "");
+      setFacebook((vendor as any).facebook ?? "");
+      setWebsite((vendor as any).website ?? "");
+      setWhat3words((vendor as any).what3words ?? "");
       setFoodCategorySearch("");
       setPhotos(nextPhotos);
       setLogoUri(assetVendor.logoUrl ?? null);
@@ -895,8 +929,12 @@ export default function VendorDashboardScreen() {
           logo_path: features.images ? nextLogoPath : null,
           menu_pdf_url: features.images ? nextMenuPdfStoragePath : null,
           menu_pdf_name: features.images ? nextMenuPdfName : null,
-          is_live: features.liveStatus ? isLive : false,
+          is_live: isLive,
           food_categories: foodCategories,
+          website: website.trim() || null,
+          instagram: instagram.trim() || null,
+          facebook: facebook.trim() || null,
+          what3words: what3words.trim() || null,
           lat,
           lng,
         })
@@ -922,7 +960,7 @@ export default function VendorDashboardScreen() {
         menu: menu.trim() || "Menu coming soon",
         schedule: schedule.trim() || "Schedule coming soon",
         vendorMessage: features.reviews ? vendorMessage.trim() : "",
-        isLive: features.liveStatus ? isLive : false,
+        isLive: isLive,
         foodCategories,
         photo: features.images ? nextPhotos[0] ?? null : null,
         photos: features.images ? nextPhotos : [],
@@ -1436,9 +1474,19 @@ export default function VendorDashboardScreen() {
         ? styles.planBadgeTextGrowth
         : styles.planBadgeTextFree;
 
-  const filteredFoodCategoryOptions = FOOD_CATEGORY_OPTIONS.filter((category) =>
-    category.toLowerCase().includes(foodCategorySearch.trim().toLowerCase())
-  );
+  const filteredFoodCategoryOptions =
+    foodCategorySearch.trim().length > 0
+      ? DEFAULT_FOOD_CATEGORY_SUGGESTIONS.filter((category) =>
+        category.toLowerCase().includes(foodCategorySearch.trim().toLowerCase())
+      )
+      : [];
+
+  // 👇 NEW: allow custom category creation
+  const canAddCustomCategory =
+    foodCategorySearch.trim().length > 0 &&
+    !foodCategories
+      .map((c) => c.toLowerCase())
+      .includes(foodCategorySearch.trim().toLowerCase());
 
   const conversionRate =
     (van.views ?? 0) > 0
@@ -1576,9 +1624,13 @@ export default function VendorDashboardScreen() {
               {van.subscriptionTier === "pro" ? `${conversionRate}%` : "Locked"}
             </Text>
 
-            {van.subscriptionTier !== "pro" ? (
+            {van.subscriptionTier === "pro" ? (
+              <Text style={styles.heroStatHint}>
+                Conversion = the percentage of listing views that turned into direction taps.
+              </Text>
+            ) : (
               <Text style={styles.heroStatHint}>Pro unlocks conversion insight</Text>
-            ) : null}
+            )}
           </View>
 
           <View style={styles.heroStatCard}>
@@ -1597,11 +1649,16 @@ export default function VendorDashboardScreen() {
       {needsListingAttention ? (
         <View style={styles.guidanceBanner}>
           <Text style={styles.guidanceBannerTitle}>
-            Your listing needs a quick update
+            Start here: complete your listing
           </Text>
           <Text style={styles.guidanceBannerText}>
-            BiteBeacon opened your Edit section because key listing details are
-            still missing. Completing them helps customers trust your business.
+            To get your listing ready for customers, complete these steps:
+
+            • Add your menu
+            • Add your schedule
+            • Upload photos
+
+            We have already opened your Edit section to make this easy.
           </Text>
 
           <Pressable
@@ -1609,7 +1666,7 @@ export default function VendorDashboardScreen() {
             onPress={jumpToEditSection}
           >
             <Text style={styles.guidanceBannerButtonText}>
-              Complete Listing Now
+              Finish My Listing
             </Text>
           </Pressable>
         </View>
@@ -1626,10 +1683,19 @@ export default function VendorDashboardScreen() {
 
           <Pressable
             style={styles.monetisationButton}
-            onPress={() => router.push("/vendor/upgrade")}
+            onPress={() => {
+              if (van.subscriptionTier === "free") {
+                router.push("/vendor/upgrade");
+                return;
+              }
+
+              manageSubscriptionFromDashboard();
+            }}
           >
             <Text style={styles.monetisationButtonText}>
-              Upgrade to improve performance
+              {van.subscriptionTier === "free"
+                ? "Upgrade to improve performance"
+                : "Manage or Upgrade Subscription"}
             </Text>
           </Pressable>
         </View>
@@ -1654,10 +1720,19 @@ export default function VendorDashboardScreen() {
 
           <Pressable
             style={styles.upgradeSignalButton}
-            onPress={() => router.push("/vendor/upgrade")}
+            onPress={() => {
+              if (van.subscriptionTier === "free") {
+                router.push("/vendor/upgrade");
+                return;
+              }
+
+              manageSubscriptionFromDashboard();
+            }}
           >
             <Text style={styles.upgradeSignalButtonText}>
-              {upgradeSignal.cta}
+              {van.subscriptionTier === "free"
+                ? upgradeSignal.cta
+                : "Manage or Upgrade Subscription"}
             </Text>
           </Pressable>
         </View>
@@ -1670,23 +1745,14 @@ export default function VendorDashboardScreen() {
         </Text>
 
         <View style={styles.quickActionsGrid}>
-          {features.liveStatus ? (
-            <Pressable
-              style={[styles.quickActionButton, styles.quickActionPrimary]}
-              onPress={() => handleLiveToggle(!isLive)}
-            >
-              <Text style={styles.quickActionPrimaryText}>
-                {isLive ? "Go Offline" : "Go Live"}
-              </Text>
-            </Pressable>
-          ) : (
-            <Pressable
-              style={[styles.quickActionButton, styles.quickActionLocked]}
-              onPress={() => router.push("/vendor/upgrade")}
-            >
-              <Text style={styles.quickActionLockedText}>Go Live 🔒</Text>
-            </Pressable>
-          )}
+          <Pressable
+            style={[styles.quickActionButton, styles.quickActionPrimary]}
+            onPress={() => handleLiveToggle(!isLive)}
+          >
+            <Text style={styles.quickActionPrimaryText}>
+              {isLive ? "Go Offline" : "Go Live"}
+            </Text>
+          </Pressable>
 
           <Pressable
             style={[styles.quickActionButton, styles.quickActionSecondary]}
@@ -1697,7 +1763,7 @@ export default function VendorDashboardScreen() {
               })
             }
           >
-            <Text style={styles.quickActionSecondaryText}>View Listing</Text>
+            <Text style={styles.quickActionSecondaryText}>View Public Listing</Text>
           </Pressable>
 
           {features.reviews ? (
@@ -1705,14 +1771,16 @@ export default function VendorDashboardScreen() {
               style={[styles.quickActionButton, styles.quickActionSecondary]}
               onPress={jumpToEditSection}
             >
-              <Text style={styles.quickActionSecondaryText}>Update Status</Text>
+              <Text style={styles.quickActionSecondaryText}>
+                Post Update to Listing
+              </Text>
             </Pressable>
           ) : (
             <Pressable
               style={[styles.quickActionButton, styles.quickActionLocked]}
               onPress={() => router.push("/vendor/upgrade")}
             >
-              <Text style={styles.quickActionLockedText}>Update Status 🔒</Text>
+              <Text style={styles.quickActionLockedText}>Post Update 🔒</Text>
             </Pressable>
           )}
 
@@ -1722,7 +1790,7 @@ export default function VendorDashboardScreen() {
               onPress={updateLocation}
             >
               <Text style={styles.quickActionSecondaryText}>
-                Update Location
+                Set Trading Location
               </Text>
             </Pressable>
           ) : (
@@ -1730,7 +1798,7 @@ export default function VendorDashboardScreen() {
               style={[styles.quickActionButton, styles.quickActionLocked]}
               onPress={() => router.push("/vendor/upgrade")}
             >
-              <Text style={styles.quickActionLockedText}>Update Location 🔒</Text>
+              <Text style={styles.quickActionLockedText}>Set Trading Location 🔒</Text>
             </Pressable>
           )}
 
@@ -1740,7 +1808,7 @@ export default function VendorDashboardScreen() {
               onPress={manageSubscriptionFromDashboard}
             >
               <Text style={styles.quickActionSecondaryText}>
-                Manage Subscription
+                Manage Plan
               </Text>
             </Pressable>
           ) : null}
@@ -2069,6 +2137,8 @@ export default function VendorDashboardScreen() {
                     <Text style={styles.upgradeFeature}>• Upload a menu PDF</Text>
                     <Text style={styles.upgradeFeature}>• Post daily status updates</Text>
                     <Text style={styles.upgradeFeature}>• Update your trading location</Text>
+                    <Text style={styles.upgradeFeature}>• Unlock Instagram, Facebook and website links</Text>
+                    <Text style={styles.upgradeFeature}>• Unlock what3words precise location</Text>
                     <Text style={styles.upgradeFeature}>• Build more trust with customers</Text>
                   </>
                 ) : (
@@ -2092,12 +2162,19 @@ export default function VendorDashboardScreen() {
 
               <Pressable
                 style={styles.upgradeButton}
-                onPress={() => router.push("/vendor/upgrade")}
+                onPress={() => {
+                  if (van.subscriptionTier === "free") {
+                    router.push("/vendor/upgrade");
+                    return;
+                  }
+
+                  manageSubscriptionFromDashboard();
+                }}
               >
                 <Text style={styles.upgradeButtonText}>
                   {van.subscriptionTier === "free"
                     ? "Upgrade to Growth"
-                    : "Upgrade to Pro"}
+                    : "Manage or Upgrade Subscription"}
                 </Text>
               </Pressable>
             </>
@@ -2169,6 +2246,16 @@ export default function VendorDashboardScreen() {
             <Text style={styles.tierItem}>• Update your location</Text>
             <Text style={styles.tierSub}>
               Stay relevant if you trade in different places
+            </Text>
+
+            <Text style={styles.tierItem}>• Unlock Instagram, Facebook and website links</Text>
+            <Text style={styles.tierSub}>
+              Let customers find, trust and follow your business more easily
+            </Text>
+
+            <Text style={styles.tierItem}>• Unlock what3words precise location</Text>
+            <Text style={styles.tierSub}>
+              Share a more precise trading location with customers
             </Text>
 
             <Text style={styles.tierHint}>
@@ -2449,6 +2536,83 @@ export default function VendorDashboardScreen() {
           />
 
           <Text style={styles.label}>Schedule</Text>
+
+          <Text style={styles.label}>Instagram</Text>
+
+          {van.subscriptionTier === "free" ? (
+            <View style={styles.inlineLockedCard}>
+              <Text style={styles.inlineLockedTitle}>Growth feature</Text>
+              <Text style={styles.inlineLockedText}>
+                Upgrade to Growth to add your Instagram and build customer trust.
+              </Text>
+            </View>
+          ) : (
+            <TextInput
+              style={styles.input}
+              value={instagram}
+              onChangeText={setInstagram}
+              placeholder="https://instagram.com/yourpage"
+              placeholderTextColor="#7A7A7A"
+            />
+          )}
+
+          <Text style={styles.label}>Facebook</Text>
+
+          {van.subscriptionTier === "free" ? (
+            <View style={styles.inlineLockedCard}>
+              <Text style={styles.inlineLockedTitle}>Growth feature</Text>
+              <Text style={styles.inlineLockedText}>
+                Upgrade to Growth to add your Facebook page.
+              </Text>
+            </View>
+          ) : (
+            <TextInput
+              style={styles.input}
+              value={facebook}
+              onChangeText={setFacebook}
+              placeholder="https://facebook.com/yourpage"
+              placeholderTextColor="#7A7A7A"
+            />
+          )}
+
+          <Text style={styles.label}>Website</Text>
+
+          {van.subscriptionTier === "free" ? (
+            <View style={styles.inlineLockedCard}>
+              <Text style={styles.inlineLockedTitle}>Growth feature</Text>
+              <Text style={styles.inlineLockedText}>
+                Upgrade to Growth to add your website link.
+              </Text>
+            </View>
+          ) : (
+            <TextInput
+              style={styles.input}
+              value={website}
+              onChangeText={setWebsite}
+              placeholder="https://yourwebsite.com"
+              placeholderTextColor="#7A7A7A"
+            />
+          )}
+
+          <Text style={styles.label}>what3words location</Text>
+
+          {van.subscriptionTier === "free" ? (
+            <View style={styles.inlineLockedCard}>
+              <Text style={styles.inlineLockedTitle}>Growth feature</Text>
+              <Text style={styles.inlineLockedText}>
+                Upgrade to Growth to add a precise what3words location.
+              </Text>
+            </View>
+          ) : (
+            <TextInput
+              style={styles.input}
+              value={what3words}
+              onChangeText={setWhat3words}
+              placeholder="e.g. filled.count.soap"
+              placeholderTextColor="#7A7A7A"
+            />
+          )}
+
           <TextInput
             style={[styles.input, styles.textArea]}
             value={schedule}
@@ -2494,7 +2658,38 @@ export default function VendorDashboardScreen() {
             })}
           </View>
 
-          {filteredFoodCategoryOptions.length === 0 ? (
+          {canAddCustomCategory ? (
+            <Pressable
+              style={styles.addCustomCategoryButton}
+              onPress={() => {
+                const trimmedCategory = foodCategorySearch.trim();
+
+                if (!trimmedCategory) return;
+
+                setFoodCategories((current) => {
+                  const alreadyExists = current.some(
+                    (item) => item.toLowerCase() === trimmedCategory.toLowerCase()
+                  );
+
+                  if (alreadyExists) return current;
+
+                  return [...current, trimmedCategory];
+                });
+
+                setFoodCategorySearch("");
+              }}
+            >
+              <Text style={styles.addCustomCategoryButtonText}>
+                Add "{foodCategorySearch.trim()}" as a cuisine
+              </Text>
+            </Pressable>
+          ) : null}
+
+          {foodCategorySearch.trim().length === 0 ? (
+            <Text style={styles.categorySearchEmptyText}>
+              Start typing to add your cuisine
+            </Text>
+          ) : filteredFoodCategoryOptions.length === 0 && !canAddCustomCategory ? (
             <Text style={styles.categorySearchEmptyText}>
               No matching categories found.
             </Text>
@@ -2502,14 +2697,14 @@ export default function VendorDashboardScreen() {
 
           {features.reviews ? (
             <>
-              <Text style={styles.label}>Status Update</Text>
+              <Text style={styles.label}>Listing update</Text>
               <View>
                 <TextInput
                   ref={statusUpdateInputRef}
                   style={[styles.input, styles.textArea]}
                   value={vendorMessage}
                   onChangeText={setVendorMessage}
-                  placeholder="Share a quick update for today"
+                  placeholder="Post a short update customers will see on your listing"
                   placeholderTextColor="#7A7A7A"
                   multiline
                   maxLength={140}
@@ -2525,20 +2720,13 @@ export default function VendorDashboardScreen() {
             </View>
           )}
 
-          {features.liveStatus ? (
-            <View style={styles.liveRow}>
-              <Text style={styles.liveLabel}>Live now</Text>
-              <Switch
-                value={isLive}
-                onValueChange={(value) => handleLiveToggle(value)}
-              />
-            </View>
-          ) : (
-            <View style={styles.liveRow}>
-              <Text style={styles.liveLabel}>Live now</Text>
-              <Text style={styles.liveLockedText}>Growth required</Text>
-            </View>
-          )}
+          <View style={styles.liveRow}>
+            <Text style={styles.liveLabel}>Show as live now</Text>
+            <Switch
+              value={isLive}
+              onValueChange={(value) => handleLiveToggle(value)}
+            />
+          </View>
 
           <Pressable
             style={[styles.primaryButton, isSaving && { opacity: 0.7 }]}
@@ -3828,6 +4016,22 @@ const styles = StyleSheet.create({
     color: MUTED_TEXT,
     marginBottom: 16,
     fontWeight: "600",
+  },
+
+  addCustomCategoryButton: {
+    backgroundColor: NAVY,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    alignItems: "center",
+  },
+
+  addCustomCategoryButtonText: {
+    color: WHITE,
+    fontSize: 14,
+    fontWeight: "700",
+    textAlign: "center",
   },
 
   inlineLockedCard: {

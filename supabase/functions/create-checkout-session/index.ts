@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=denonext";
 
 const corsHeaders = {
@@ -14,16 +15,15 @@ Deno.serve(async (req) => {
 
   try {
     const secretKey = Deno.env.get("STRIPE_SECRET_KEY");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-    if (!secretKey) {
+    if (!secretKey || !supabaseUrl || !serviceRoleKey) {
       return new Response(
-        JSON.stringify({ error: "Missing STRIPE_SECRET_KEY" }),
+        JSON.stringify({ error: "Missing environment variables" }),
         {
           status: 500,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
     }
@@ -32,21 +32,66 @@ Deno.serve(async (req) => {
       apiVersion: "2023-10-16",
     });
 
-    const { priceId, vendorId, tier, userId } = await req.json();
+    // 🔒 STEP 1: Get auth header
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    if (!priceId) {
+    // 🔒 STEP 2: Create user-scoped client
+    const userClient = createClient(supabaseUrl, serviceRoleKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const {
+      data: { user },
+      error: userError,
+    } = await userClient.auth.getUser();
+
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: "Invalid user" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // 🔒 STEP 3: Parse input safely
+    const { priceId, vendorId, tier } = await req.json();
+
+    if (!priceId || !vendorId) {
       return new Response(
-        JSON.stringify({ error: "Missing priceId" }),
+        JSON.stringify({ error: "Missing required fields" }),
         {
           status: 400,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
     }
 
+    // 🔒 STEP 4: Verify vendor ownership
+    const serviceClient = createClient(supabaseUrl, serviceRoleKey);
+
+    const { data: vendor, error: vendorError } = await serviceClient
+      .from("vendors")
+      .select("id, owner_id")
+      .eq("id", vendorId)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+
+    if (vendorError || !vendor) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized vendor access" }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // ✅ STEP 5: Create Stripe session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [
@@ -60,30 +105,27 @@ Deno.serve(async (req) => {
       metadata: {
         vendorId,
         tier,
-        userId,
+        userId: user.id, // ✅ now trusted
       },
     });
 
     return new Response(JSON.stringify({ url: session.url }), {
       status: 200,
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json",
-      },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("Stripe checkout error:", error);
 
     return new Response(
       JSON.stringify({
-        error: error instanceof Error ? error.message : "Failed to create session",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create session",
       }),
       {
         status: 500,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   }

@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -20,23 +20,37 @@ export default function ClaimSelectScreen() {
     latitude: number;
     longitude: number;
   } | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  const isActiveRef = useRef(true);
 
   useFocusEffect(
     useCallback(() => {
+      isActiveRef.current = true;
       loadSpottedVans();
+
+      return () => {
+        isActiveRef.current = false;
+      };
     }, [])
   );
 
   useEffect(() => {
     loadUserLocation();
+
+    return () => {
+      isActiveRef.current = false;
+    };
   }, []);
 
   function getDistanceMiles(
     userLat: number,
     userLng: number,
-    vanLat: number,
-    vanLng: number
+    vanLat?: number,
+    vanLng?: number
   ) {
+    if (!vanLat || !vanLng) return Infinity;
+
     const toRad = (value: number) => (value * Math.PI) / 180;
     const earthRadiusKm = 6371;
 
@@ -60,18 +74,18 @@ export default function ClaimSelectScreen() {
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
 
-      if (permission.status !== "granted") {
-        return;
-      }
+      if (permission.status !== "granted") return;
 
       const current = await Location.getCurrentPositionAsync({});
+
+      if (!isActiveRef.current) return;
 
       setUserLocation({
         latitude: current.coords.latitude,
         longitude: current.coords.longitude,
       });
     } catch {
-      // leave location unset
+      // safe fallback
     }
   }
 
@@ -80,29 +94,39 @@ export default function ClaimSelectScreen() {
 
     try {
       const allVendors = await getAllVendors();
-      const temporaryVans = allVendors.filter(
+
+      if (!isActiveRef.current) return;
+
+      const claimableVans = allVendors.filter(
         (vendor) =>
-          vendor.temporary === true &&
           !vendor.owner_id &&
-          !vendor.isSuspended
+          !vendor.isSuspended &&
+          (
+            vendor.listingSource === "user_spotted" ||
+            vendor.listingSource === "admin_seeded"
+          )
       );
-      setSpottedVans(temporaryVans);
+
+      setSpottedVans(claimableVans);
     } catch {
-      setSpottedVans([]);
+      if (isActiveRef.current) {
+        setSpottedVans([]);
+      }
     } finally {
-      setLoading(false);
+      if (isActiveRef.current) {
+        setLoading(false);
+      }
     }
   }
 
   const filteredVans = [...spottedVans]
     .filter((van) => {
       const query = searchQuery.trim().toLowerCase();
-
       if (!query) return true;
 
       return (
-        van.name.toLowerCase().includes(query) ||
-        van.cuisine.toLowerCase().includes(query)
+        (van.name ?? "").toLowerCase().includes(query) ||
+        (van.cuisine ?? "").toLowerCase().includes(query)
       );
     })
     .sort((a, b) => {
@@ -126,14 +150,21 @@ export default function ClaimSelectScreen() {
     });
 
   function getLocationText(van: Van) {
+    if (!van.lat || !van.lng) return "Location unavailable";
     return `${van.lat.toFixed(3)}, ${van.lng.toFixed(3)}`;
   }
 
   function handleSelectVan(van: Van) {
+    if (isNavigating) return;
+
+    setIsNavigating(true);
+
     router.push({
       pathname: "/vendor/claim",
       params: { id: van.id },
     });
+
+    setTimeout(() => setIsNavigating(false), 500);
   }
 
   return (
@@ -141,8 +172,10 @@ export default function ClaimSelectScreen() {
       <Text style={styles.kicker}>VENDOR SETUP</Text>
       <Text style={styles.title}>Find Your Van</Text>
       <Text style={styles.subtitle}>
-        If your van is already listed, claim it first. If it is not listed, you
-        can create a new vendor listing instead.
+        We may already have your business listed from a community sighting.
+        Search for your business first to avoid creating a duplicate listing.
+        If you find it, claim it to take control of that listing.
+        If you do not find it, you can create a new vendor listing instead.
       </Text>
 
       <TextInput
@@ -167,14 +200,18 @@ export default function ClaimSelectScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={6}
           renderItem={({ item }) => (
             <Pressable
               style={styles.vanCard}
               onPress={() => handleSelectVan(item)}
+              disabled={isNavigating}
             >
               <Text style={styles.vanName}>{item.name}</Text>
               <Text style={styles.vanMeta}>{item.cuisine}</Text>
-              <Text style={styles.vanLocation}>📍 {getLocationText(item)}</Text>
+              <Text style={styles.vanLocation}>
+                📍 {getLocationText(item)}
+              </Text>
               <Text style={styles.vanHint}>Tap to start claim request</Text>
             </Pressable>
           )}
@@ -183,7 +220,7 @@ export default function ClaimSelectScreen() {
 
       <Pressable
         style={styles.primaryButton}
-        onPress={() => router.push("/vendor/register")}
+        onPress={() => router.replace("/vendor/register")}
       >
         <Text style={styles.primaryButtonText}>My Van Is Not Listed</Text>
       </Pressable>
@@ -201,7 +238,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#0B2A5B",
     padding: 24,
   },
-
   kicker: {
     fontSize: 12,
     fontWeight: "800",
@@ -209,21 +245,18 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     marginBottom: 8,
   },
-
   title: {
     fontSize: 30,
     fontWeight: "800",
     color: "#FFFFFF",
     marginBottom: 8,
   },
-
   subtitle: {
     fontSize: 15,
     color: "rgba(255,255,255,0.75)",
     lineHeight: 22,
     marginBottom: 20,
   },
-
   searchInput: {
     backgroundColor: "rgba(255,255,255,0.12)",
     borderWidth: 2,
@@ -234,18 +267,15 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     color: "#FFFFFF",
   },
-
   helperText: {
     fontSize: 15,
     color: "rgba(255,255,255,0.75)",
     lineHeight: 22,
     marginBottom: 20,
   },
-
   listContent: {
     paddingBottom: 20,
   },
-
   vanCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 18,
@@ -254,33 +284,28 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#FF7A00",
   },
-
   vanName: {
     fontSize: 17,
     fontWeight: "800",
     color: "#0B2A5B",
     marginBottom: 4,
   },
-
   vanMeta: {
     fontSize: 14,
     color: "#666666",
     marginBottom: 6,
   },
-
   vanLocation: {
     fontSize: 13,
     color: "#0B2A5B",
     marginBottom: 6,
     fontWeight: "600",
   },
-
   vanHint: {
     fontSize: 13,
     fontWeight: "700",
     color: "#FF7A00",
   },
-
   primaryButton: {
     backgroundColor: "#FF7A00",
     paddingVertical: 14,
@@ -289,13 +314,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 10,
   },
-
   primaryButtonText: {
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
   },
-
   backButton: {
     backgroundColor: "#D9D9D9",
     paddingVertical: 14,
@@ -303,7 +326,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 8,
   },
-
   backButtonText: {
     color: "#222222",
     fontSize: 16,

@@ -5,6 +5,10 @@ export type Van = {
   name: string;
   lat: number;
   lng: number;
+  isApproved?: boolean;
+  instagramUrl?: string | null;
+  facebookUrl?: string | null;
+  websiteUrl?: string | null;
   rating: number;
   cuisine: string;
   temporary?: boolean;
@@ -20,6 +24,7 @@ export type Van = {
   vendorName?: string;
   menu?: string;
   schedule?: string;
+  what3words?: string | null;
   vendorMessage?: string;
   isLive: boolean;
   views?: number;

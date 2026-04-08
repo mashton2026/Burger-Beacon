@@ -1,5 +1,6 @@
 import { router } from "expo-router";
-import { useState } from "react";
+
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Keyboard,
@@ -18,6 +19,7 @@ import MapView, {
   type MapPressEvent,
   type Region,
 } from "react-native-maps";
+
 import { getCurrentUser } from "../../services/authService";
 import { createVendor } from "../../services/vendorService";
 
@@ -29,17 +31,33 @@ const DEFAULT_REGION: Region = {
 };
 
 export default function RegisterVendorScreen() {
+  const isMountedRef = useRef(true);
+
   const [name, setName] = useState("");
   const [vendorName, setVendorName] = useState("");
   const [cuisine, setCuisine] = useState("");
   const [menu, setMenu] = useState("");
   const [schedule, setSchedule] = useState("");
+  const [instagramUrl, setInstagramUrl] = useState("");
+  const [facebookUrl, setFacebookUrl] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [what3words, setWhat3words] = useState("");
+
   const [region, setRegion] = useState<Region>(DEFAULT_REGION);
+
   const [selectedLocation, setSelectedLocation] = useState<{
     latitude: number;
     longitude: number;
   } | null>(null);
+
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   function handleMapPress(event: MapPressEvent) {
     const { latitude, longitude } = event.nativeEvent.coordinate;
@@ -52,6 +70,9 @@ export default function RegisterVendorScreen() {
   }
 
   async function handleCreateVendor() {
+    // 🔒 HARD GUARD (prevents double submit)
+    if (isSaving) return;
+
     try {
       if (
         !name.trim() ||
@@ -71,7 +92,10 @@ export default function RegisterVendorScreen() {
       const currentUser = await getCurrentUser();
 
       if (!currentUser) {
-        Alert.alert("Login required", "Please log in to create a vendor listing.");
+        Alert.alert(
+          "Login required",
+          "Please log in to create a vendor listing."
+        );
         return;
       }
 
@@ -94,7 +118,13 @@ export default function RegisterVendorScreen() {
         owner_id: currentUser.id,
         subscriptionTier: "free",
         foodCategories: [],
+        what3words: what3words.trim() || null,
+        instagramUrl: instagramUrl.trim() || undefined,
+        facebookUrl: facebookUrl.trim() || undefined,
+        websiteUrl: websiteUrl.trim() || undefined,
       });
+
+      if (!isMountedRef.current) return;
 
       Alert.alert("Success", "Vendor listing created successfully.", [
         {
@@ -103,12 +133,16 @@ export default function RegisterVendorScreen() {
         },
       ]);
     } catch (error) {
+      if (!isMountedRef.current) return;
+
       Alert.alert(
         "Error",
         error instanceof Error ? error.message : "Failed to create vendor"
       );
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) {
+        setIsSaving(false);
+      }
     }
   }
 
@@ -126,6 +160,7 @@ export default function RegisterVendorScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.title}>Create Vendor</Text>
+
           <Text style={styles.subtitle}>
             Build your listing, place it on the map, and get ready to go live.
           </Text>
@@ -180,12 +215,47 @@ export default function RegisterVendorScreen() {
               multiline
               textAlignVertical="top"
             />
+
+            <Text style={styles.sectionTitle}>Verification (optional)</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="what3words (e.g. filled.count.soap)"
+              placeholderTextColor="#7A7A7A"
+              value={what3words}
+              onChangeText={setWhat3words}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Instagram link"
+              placeholderTextColor="#7A7A7A"
+              value={instagramUrl}
+              onChangeText={setInstagramUrl}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Facebook link"
+              placeholderTextColor="#7A7A7A"
+              value={facebookUrl}
+              onChangeText={setFacebookUrl}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Website link"
+              placeholderTextColor="#7A7A7A"
+              value={websiteUrl}
+              onChangeText={setWebsiteUrl}
+            />
           </View>
 
           <View style={styles.card}>
             <View style={styles.locationHeader}>
               <View style={styles.locationTextWrap}>
                 <Text style={styles.sectionTitle}>Location</Text>
+
                 <Text style={styles.locationSubtext}>
                   {selectedLocation
                     ? "Tap elsewhere on the map to move the marker."
@@ -214,7 +284,9 @@ export default function RegisterVendorScreen() {
 
               <View style={styles.mapOverlay}>
                 <Text style={styles.mapOverlayText}>
-                  {selectedLocation ? "Location selected" : "Tap anywhere on the map"}
+                  {selectedLocation
+                    ? "Location selected"
+                    : "Tap anywhere on the map"}
                 </Text>
               </View>
             </View>
@@ -244,20 +316,9 @@ const TEXT_MUTED = "#5D6F8F";
 const BORDER = "rgba(255,122,0,0.75)";
 
 const styles = StyleSheet.create({
-  keyboardContainer: {
-    flex: 1,
-  },
-
-  container: {
-    flex: 1,
-    backgroundColor: NAVY,
-  },
-
-  content: {
-    padding: 20,
-    paddingBottom: 140,
-    flexGrow: 1,
-  },
+  keyboardContainer: { flex: 1 },
+  container: { flex: 1, backgroundColor: NAVY },
+  content: { padding: 20, paddingBottom: 140, flexGrow: 1 },
 
   title: {
     fontSize: 28,
@@ -300,13 +361,8 @@ const styles = StyleSheet.create({
     color: "#222222",
   },
 
-  textArea: {
-    minHeight: 96,
-  },
-
-  textAreaSmall: {
-    minHeight: 72,
-  },
+  textArea: { minHeight: 96 },
+  textAreaSmall: { minHeight: 72 },
 
   locationHeader: {
     flexDirection: "row",
@@ -316,9 +372,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
-  locationTextWrap: {
-    flex: 1,
-  },
+  locationTextWrap: { flex: 1 },
 
   locationSubtext: {
     fontSize: 13,
@@ -349,10 +403,7 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
   },
 
-  map: {
-    width: "100%",
-    height: 270,
-  },
+  map: { width: "100%", height: 270 },
 
   mapOverlay: {
     position: "absolute",
@@ -380,9 +431,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
-  buttonDisabled: {
-    opacity: 0.7,
-  },
+  buttonDisabled: { opacity: 0.7 },
 
   buttonText: {
     color: "#FFFFFF",

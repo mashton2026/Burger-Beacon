@@ -1,75 +1,121 @@
-import { router } from "expo-router";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
+import {
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { theme } from "../constants/theme";
 
 export default function WelcomeScreen() {
+  const [isNavigating, setIsNavigating] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setIsNavigating(false);
+    }, [])
+  );
+
+  function handleBrowse() {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    router.push("/auth/user-gateway");
+  }
+
+  function handleVendor() {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    router.push("/auth/login");
+  }
+
   return (
-    <View style={styles.container}>
-      <View style={styles.bgOrbTop} />
-      <View style={styles.bgOrbBottom} />
-      <View style={styles.lineOne} />
-      <View style={styles.lineTwo} />
-      <View style={styles.lineThree} />
-      <View style={styles.lineFour} />
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <View style={styles.bgOrbTop} />
+        <View style={styles.bgOrbBottom} />
+        <View style={styles.lineOne} />
+        <View style={styles.lineTwo} />
+        <View style={styles.lineThree} />
+        <View style={styles.lineFour} />
 
-      <View style={styles.dotClusterBottom}>
-        <View style={styles.dot} />
-        <View style={styles.dot} />
-        <View style={styles.dotAccent} />
-      </View>
-
-      <View style={styles.dotClusterMid}>
-        <View style={styles.dotSmall} />
-        <View style={styles.dotAccentSmall} />
-      </View>
-
-      <View style={styles.dotClusterTop}>
-        <View style={styles.dotSmall} />
-        <View style={styles.dotSmall} />
-        <View style={styles.dotAccentSmall} />
-      </View>
-
-      <View style={styles.content}>
-        <View style={styles.logoCard}>
-          <Image
-            source={require("../assets/images/logo.png")}
-            style={styles.logo}
-            resizeMode="cover"
-          />
+        <View style={styles.dotClusterBottom}>
+          <View style={styles.dot} />
+          <View style={styles.dot} />
+          <View style={styles.dotAccent} />
         </View>
 
-        <Text style={styles.title}>Putting great food on the map</Text>
+        <View style={styles.dotClusterMid}>
+          <View style={styles.dotSmall} />
+          <View style={styles.dotAccentSmall} />
+        </View>
 
-        <View style={styles.divider} />
+        <View style={styles.dotClusterTop}>
+          <View style={styles.dotSmall} />
+          <View style={styles.dotSmall} />
+          <View style={styles.dotAccentSmall} />
+        </View>
 
-        <Text style={styles.tagline}>
-          Discover the best street food, hidden gems, and unique eats in every
-          town — from food vans to must-try local favourites.
-        </Text>
+        <View style={styles.content}>
+          <View style={styles.logoCard}>
+            <Image
+              source={require("../assets/images/logo.png")}
+              style={styles.logo}
+              resizeMode="cover"
+            />
+          </View>
 
-        <View style={styles.buttonWrap}>
-          <Pressable
-            style={styles.primaryButton}
-            onPress={() => router.push("/auth/user-gateway")}
-          >
-            <Text style={styles.primaryButtonText}>Browse Food Vendors</Text>
-          </Pressable>
+          <Text style={styles.title}>Putting great food on the map</Text>
 
-          <Pressable
-            style={styles.secondaryButton}
-            onPress={() => router.push("/auth/login")}
-          >
-            <Text style={styles.secondaryButtonText}>
-              Vendor / Admin Portal
-            </Text>
-          </Pressable>
+          <View style={styles.divider} />
+
+          <Text style={styles.tagline}>
+            Discover the best street food, hidden gems, and unique eats in every
+            town — from food vans to must-try local favourites.
+          </Text>
+
+          <View style={styles.buttonWrap}>
+            <Pressable
+              style={[
+                styles.primaryButton,
+                isNavigating && styles.buttonDisabled,
+              ]}
+              onPress={handleBrowse}
+              disabled={isNavigating}
+              accessibilityRole="button"
+            >
+              <Text style={styles.primaryButtonText}>
+                {isNavigating ? "Opening..." : "Browse Food Vendors"}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.secondaryButton,
+                isNavigating && styles.buttonDisabled,
+              ]}
+              onPress={handleVendor}
+              disabled={isNavigating}
+              accessibilityRole="button"
+            >
+              <Text style={styles.secondaryButtonText}>
+                Vendor / Admin Portal
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,
@@ -277,5 +323,9 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "800",
+  },
+
+  buttonDisabled: {
+    opacity: 0.7,
   },
 });

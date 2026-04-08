@@ -112,6 +112,7 @@ const FAQ_ITEMS: FAQItem[] = [
         title: "How accurate are listings?",
         content: [
             "Some listings are managed directly by vendors, while others may begin as community-spotted listings.",
+            "Vendor-managed listings are usually more up to date than community-spotted listings, but details can still change.",
             "Details such as location, timing, menu items, and live status may change, so users should always use their own judgment before travelling.",
         ],
     },
@@ -209,6 +210,7 @@ const FAQ_ITEMS: FAQItem[] = [
         content: [
             `Support email: ${SUPPORT_EMAIL}`,
             "Please include as much useful detail as possible, such as the issue, the screen you were on, and whether you were using the app as a guest, user, or vendor.",
+            "Support response times can vary depending on request volume.",
         ],
     },
 
@@ -218,6 +220,7 @@ const FAQ_ITEMS: FAQItem[] = [
         content: [
             "If something is not working correctly, you can report it directly to support.",
             "This opens your email app with a pre-filled issue template to make reporting easier.",
+            "Please do not include sensitive payment information in support emails.",
         ],
     },
     {
@@ -264,10 +267,11 @@ export default function HelpScreen() {
             "BiteBeacon Support Request"
         )}`;
 
-        const canOpen = await Linking.canOpenURL(mailtoUrl);
-        if (!canOpen) return;
-
-        await Linking.openURL(mailtoUrl);
+        try {
+            await Linking.openURL(mailtoUrl);
+        } catch {
+            // no-op for now
+        }
     }
 
     async function handleReportIssue() {
@@ -283,10 +287,11 @@ export default function HelpScreen() {
 
         const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
 
-        const canOpen = await Linking.canOpenURL(mailtoUrl);
-        if (!canOpen) return;
-
-        await Linking.openURL(mailtoUrl);
+        try {
+            await Linking.openURL(mailtoUrl);
+        } catch {
+            // no-op for now
+        }
     }
 
     const filteredItems = useMemo(() => {

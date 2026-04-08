@@ -16,15 +16,24 @@ export default function ForgotPasswordScreen() {
     const [isSending, setIsSending] = useState(false);
 
     async function handleResetPassword() {
-        if (!email.trim()) {
+        const trimmedEmail = email.trim().toLowerCase();
+
+        if (!trimmedEmail) {
             Alert.alert("Missing email", "Please enter your email address.");
+            return;
+        }
+
+        const emailIsValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
+
+        if (!emailIsValid) {
+            Alert.alert("Invalid email", "Please enter a valid email address.");
             return;
         }
 
         setIsSending(true);
 
         try {
-            const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+            const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
 
             if (error) {
                 Alert.alert("Reset failed", error.message);
@@ -35,7 +44,6 @@ export default function ForgotPasswordScreen() {
                 "Reset email sent",
                 "If that email exists, a password reset link has been sent."
             );
-
             router.back();
         } catch (error) {
             Alert.alert(
@@ -66,13 +74,15 @@ export default function ForgotPasswordScreen() {
                     placeholder="Enter your email"
                     placeholderTextColor="#7A7A7A"
                     autoCapitalize="none"
+                    autoCorrect={false}
                     keyboardType="email-address"
                     value={email}
                     onChangeText={setEmail}
+                    editable={!isSending}
                 />
 
                 <Pressable
-                    style={styles.primaryButton}
+                    style={[styles.primaryButton, isSending && styles.buttonDisabled]}
                     onPress={handleResetPassword}
                     disabled={isSending}
                 >
@@ -82,8 +92,9 @@ export default function ForgotPasswordScreen() {
                 </Pressable>
 
                 <Pressable
-                    style={styles.secondaryButton}
+                    style={[styles.secondaryButton, isSending && styles.buttonDisabled]}
                     onPress={() => router.back()}
+                    disabled={isSending}
                 >
                     <Text style={styles.secondaryButtonText}>Back</Text>
                 </Pressable>
@@ -99,11 +110,9 @@ const styles = StyleSheet.create({
         padding: 24,
         justifyContent: "center",
     },
-
     heroBlock: {
         marginBottom: 24,
     },
-
     kicker: {
         fontSize: 12,
         fontWeight: "800",
@@ -111,20 +120,17 @@ const styles = StyleSheet.create({
         color: theme.colors.secondary,
         marginBottom: 8,
     },
-
     title: {
         fontSize: 34,
         fontWeight: "800",
         color: theme.colors.textOnDark,
         marginBottom: 8,
     },
-
     subtitle: {
         fontSize: 15,
         lineHeight: 22,
         color: "rgba(255,255,255,0.78)",
     },
-
     card: {
         backgroundColor: theme.colors.card,
         borderRadius: 24,
@@ -132,21 +138,18 @@ const styles = StyleSheet.create({
         borderWidth: 2,
         borderColor: theme.colors.border,
     },
-
     sectionTitle: {
         fontSize: 22,
         fontWeight: "800",
         color: theme.colors.background,
         marginBottom: 18,
     },
-
     label: {
         fontSize: 14,
         fontWeight: "700",
         color: theme.colors.background,
         marginBottom: 8,
     },
-
     input: {
         backgroundColor: "#FFFFFF",
         borderWidth: 2,
@@ -157,7 +160,6 @@ const styles = StyleSheet.create({
         marginBottom: 18,
         color: theme.colors.text,
     },
-
     primaryButton: {
         backgroundColor: theme.colors.primary,
         paddingVertical: 15,
@@ -165,13 +167,11 @@ const styles = StyleSheet.create({
         alignItems: "center",
         marginBottom: 12,
     },
-
     primaryButtonText: {
         color: "#FFFFFF",
         fontSize: 16,
         fontWeight: "800",
     },
-
     secondaryButton: {
         backgroundColor: theme.colors.card,
         borderWidth: 2,
@@ -180,10 +180,12 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         alignItems: "center",
     },
-
     secondaryButtonText: {
         color: "#222222",
         fontSize: 16,
         fontWeight: "700",
+    },
+    buttonDisabled: {
+        opacity: 0.6,
     },
 });

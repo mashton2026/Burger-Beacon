@@ -49,10 +49,13 @@ export default function FavouritesScreen() {
       }
 
       const allVendors = await getAllVendors();
+      const favouriteVendorIdSet = new Set(favouriteVendorIds);
 
       const filteredFavourites = allVendors.filter(
-        (vendor) => favouriteVendorIds.includes(vendor.id) && !vendor.isSuspended
+        (vendor) => favouriteVendorIdSet.has(vendor.id) && !vendor.isSuspended
       );
+
+      filteredFavourites.sort((a, b) => a.name.localeCompare(b.name));
 
       setFavouriteVans(filteredFavourites);
     } catch (error) {
@@ -153,35 +156,29 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-
   listContent: {
     paddingHorizontal: 20,
     paddingTop: 24,
     paddingBottom: 40,
   },
-
   header: {
     marginBottom: 20,
   },
-
   title: {
     fontSize: 28,
     fontWeight: "800",
     color: "#FFFFFF",
     marginBottom: 8,
   },
-
   subtitle: {
     fontSize: 15,
     color: "rgba(255,255,255,0.75)",
   },
-
   emptyState: {
     paddingVertical: 48,
     alignItems: "center",
     justifyContent: "center",
   },
-
   emptyStateTitle: {
     fontSize: 20,
     fontWeight: "800",
@@ -189,7 +186,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textAlign: "center",
   },
-
   emptyStateText: {
     fontSize: 14,
     color: "rgba(255,255,255,0.72)",
@@ -197,13 +193,11 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     maxWidth: 300,
   },
-
   actionRow: {
     width: "100%",
     gap: 12,
     marginTop: 18,
   },
-
   primaryActionButton: {
     backgroundColor: "#FFFFFF",
     paddingVertical: 12,
@@ -213,12 +207,10 @@ const styles = StyleSheet.create({
     marginTop: 18,
     minWidth: 180,
   },
-
   primaryActionButtonText: {
     color: "#0B2A5B",
     fontWeight: "700",
   },
-
   secondaryActionButton: {
     backgroundColor: "#FF7A00",
     paddingVertical: 12,
@@ -227,7 +219,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     minWidth: 180,
   },
-
   secondaryActionButtonText: {
     color: "#FFFFFF",
     fontWeight: "700",

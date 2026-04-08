@@ -1,21 +1,68 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../lib/supabase";
 
-function getFileExtension(value: string, fallback: string) {
-    const cleanValue = value.split("?")[0];
+function requireValue(value: string, label: string): string {
+    const trimmed = value?.trim();
+
+    if (!trimmed) {
+        throw new Error(`${label} is required.`);
+    }
+
+    return trimmed;
+}
+
+function getFileExtension(value: string, fallback: string): string {
+    const cleanValue = value.split("?")[0].trim();
 
     if (!cleanValue.includes(".")) {
         return fallback;
     }
 
     const parts = cleanValue.split(".");
-    const extension = parts[parts.length - 1]?.toLowerCase();
+    const extension = parts[parts.length - 1]?.toLowerCase()?.trim();
 
-    if (!extension) {
-        return fallback;
+    return extension || fallback;
+}
+
+function normalizeImageExtension(extension: string): "jpg" | "jpeg" | "png" | "webp" {
+    if (extension === "jpg") return "jpg";
+    if (extension === "jpeg") return "jpeg";
+    if (extension === "png") return "png";
+    if (extension === "webp") return "webp";
+    return "jpg";
+}
+
+function getImageContentType(extension: string): "image/jpeg" | "image/png" | "image/webp" {
+    const safeExtension = normalizeImageExtension(extension);
+
+    if (safeExtension === "png") return "image/png";
+    if (safeExtension === "webp") return "image/webp";
+    return "image/jpeg";
+}
+
+function normalizePdfFileName(fileName?: string | null): string {
+    const trimmed = fileName?.trim();
+
+    if (!trimmed) {
+        return "menu.pdf";
     }
 
-    return extension;
+    const extension = getFileExtension(trimmed, "pdf");
+
+    if (extension !== "pdf") {
+        return `${trimmed}.pdf`;
+    }
+
+    return trimmed;
+}
+
+function createStoragePath(
+    userId: string,
+    prefix: string,
+    extension: string
+): string {
+    const randomPart = Math.random().toString(36).slice(2, 8);
+    return `${userId}/${prefix}-${Date.now()}-${randomPart}.${extension}`;
 }
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -31,7 +78,9 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
 }
 
 async function fileUriToArrayBuffer(uri: string): Promise<ArrayBuffer> {
-    const base64 = await FileSystem.readAsStringAsync(uri, {
+    const safeUri = requireValue(uri, "File URI");
+
+    const base64 = await FileSystem.readAsStringAsync(safeUri, {
         encoding: FileSystem.EncodingType.Base64,
     });
 
@@ -42,27 +91,24 @@ export async function uploadVendorPhotos(
     userId: string,
     photoUris: string[]
 ): Promise<string[]> {
+    const safeUserId = requireValue(userId, "User ID");
+
+    if (!Array.isArray(photoUris) || photoUris.length === 0) {
+        return [];
+    }
+
     const uploadedUrls: string[] = [];
 
     for (let index = 0; index < photoUris.length; index += 1) {
-        const uri = photoUris[index];
-
-        const extension = getFileExtension(uri, "jpg");
-
-        const filePath = `${userId}/${Date.now()}-${index}-${Math.random()
-            .toString(36)
-            .slice(2, 8)}.${extension}`;
-
+        const uri = requireValue(photoUris[index] ?? "", "Photo URI");
+        const extension = normalizeImageExtension(getFileExtension(uri, "jpg"));
+        const filePath = createStoragePath(
+            safeUserId,
+            `photo-${index}`,
+            extension
+        );
         const fileBody = await fileUriToArrayBuffer(uri);
-
-        const contentType =
-            extension === "jpg" || extension === "jpeg"
-                ? "image/jpeg"
-                : extension === "png"
-                    ? "image/png"
-                    : extension === "webp"
-                        ? "image/webp"
-                        : "image/jpeg";
+        const contentType = getImageContentType(extension);
 
         const { error } = await supabase.storage
             .from("vendor-photos")
@@ -94,15 +140,11 @@ export async function uploadVendorMenuPdf(
     fileName: string;
     signedUrl: string | null;
 }> {
-    const finalFileName = fileName?.trim() || "menu.pdf";
-
-    const extension = getFileExtension(finalFileName, "pdf");
-
-    const storagePath = `${userId}/${Date.now()}-menu-${Math.random()
-        .toString(36)
-        .slice(2, 8)}.${extension}`;
-
-    const fileBody = await fileUriToArrayBuffer(fileUri);
+    const safeUserId = requireValue(userId, "User ID");
+    const safeFileUri = requireValue(fileUri, "File URI");
+    const finalFileName = normalizePdfFileName(fileName);
+    const storagePath = createStoragePath(safeUserId, "menu", "pdf");
+    const fileBody = await fileUriToArrayBuffer(safeFileUri);
 
     const { error } = await supabase.storage
         .from("vendor-menus")
@@ -127,9 +169,11 @@ export async function uploadVendorMenuPdf(
 export async function getVendorMenuPdfSignedUrl(
     storagePath: string
 ): Promise<string | null> {
+    const safeStoragePath = requireValue(storagePath, "Storage path");
+
     const { data, error } = await supabase.storage
         .from("vendor-menus")
-        .createSignedUrl(storagePath, 60 * 60);
+        .createSignedUrl(safeStoragePath, 60 * 60);
 
     if (error) {
         return null;
@@ -145,20 +189,12 @@ export async function uploadVendorLogo(
     publicUrl: string;
     storagePath: string;
 }> {
-    const extension = getFileExtension(fileUri, "png");
-
-    const filePath = `${userId}/logo-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}.${extension}`;
-
-    const fileBody = await fileUriToArrayBuffer(fileUri);
-
-    const contentType =
-        extension === "png"
-            ? "image/png"
-            : extension === "webp"
-                ? "image/webp"
-                : "image/jpeg";
+    const safeUserId = requireValue(userId, "User ID");
+    const safeFileUri = requireValue(fileUri, "File URI");
+    const extension = normalizeImageExtension(getFileExtension(safeFileUri, "png"));
+    const filePath = createStoragePath(safeUserId, "logo", extension);
+    const fileBody = await fileUriToArrayBuffer(safeFileUri);
+    const contentType = getImageContentType(extension);
 
     const { error } = await supabase.storage
         .from("vendor-logos")

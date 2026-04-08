@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     Alert,
     Pressable,
@@ -35,8 +35,22 @@ export default function ClaimVendorScreen() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isChecking, setIsChecking] = useState(true);
 
+    const isActiveRef = useRef(true);
+
     useEffect(() => {
+        isActiveRef.current = true;
+
+        if (!spottedVendorId) {
+            Alert.alert("Invalid request", "Missing vendor ID.");
+            router.back();
+            return;
+        }
+
         loadClaimDefaults();
+
+        return () => {
+            isActiveRef.current = false;
+        };
     }, [spottedVendorId]);
 
     async function loadClaimDefaults() {
@@ -83,12 +97,13 @@ export default function ClaimVendorScreen() {
             if (existingClaim) {
                 Alert.alert(
                     "Claim submitted",
-                    "Your claim is now under review.\n\nNext step:\nSend your 3 selected proof methods to support@bitebeacon.uk using the same email as this claim.\n\nYou will gain access to this listing once approved."
+                    "Your claim is now under review.\n\nNext step:\nSend your 3 selected proof methods to support@bitebeacon.uk using the same email as this claim.\n\nYou will gain access once approved."
                 );
-
                 router.replace("/vendor/dashboard");
                 return;
             }
+
+            if (!isActiveRef.current) return;
 
             setClaimName(vendor.name || "");
             setClaimEmail(user.email ?? "");
@@ -102,11 +117,15 @@ export default function ClaimVendorScreen() {
             );
             router.back();
         } finally {
-            setIsChecking(false);
+            if (isActiveRef.current) {
+                setIsChecking(false);
+            }
         }
     }
 
     function toggleVerificationMethod(method: string) {
+        if (isSubmitting) return;
+
         setVerificationMethods((current) => {
             if (current.includes(method)) {
                 return current.filter((item) => item !== method);
@@ -125,7 +144,11 @@ export default function ClaimVendorScreen() {
     }
 
     async function handleSubmitClaim() {
-        if (!claimName.trim() || !claimEmail.trim() || !claimMessage.trim()) {
+        if (isSubmitting) return;
+
+        const trimmedEmail = claimEmail.trim().toLowerCase();
+
+        if (!claimName.trim() || !trimmedEmail || !claimMessage.trim()) {
             Alert.alert(
                 "Missing details",
                 "Please fill in business name, contact email, and claim message."
@@ -155,14 +178,14 @@ export default function ClaimVendorScreen() {
                 spottedVendorId,
                 claimingUserId: user.id,
                 claimName: claimName.trim(),
-                claimEmail: claimEmail.trim(),
+                claimEmail: trimmedEmail,
                 claimMessage: claimMessage.trim(),
                 verificationMethods,
             });
 
             Alert.alert(
                 "Claim submitted",
-                "Your claim has been submitted. Please send your 3 selected proof methods to support@bitebeacon.uk using the same email as this claim."
+                "Your claim has been submitted. Please send your 3 selected proof methods to support@bitebeacon.uk using the same email."
             );
 
             router.back();
@@ -182,48 +205,40 @@ export default function ClaimVendorScreen() {
             <Text style={styles.title}>Claim This Van</Text>
             <Text style={styles.subtitle}>
                 Submit your request to take ownership of this community spotted listing.
-                BiteBeacon will review your claim before approval.
             </Text>
 
             {isChecking ? (
-                <Text style={styles.loadingText}>Checking listing details...</Text>
+                <Text style={styles.loadingText}>Checking listing...</Text>
             ) : (
                 <>
                     <Text style={styles.label}>Business Name</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="Enter your business name"
-                        placeholderTextColor="#7A7A7A"
                         value={claimName}
                         onChangeText={setClaimName}
+                        editable={!isSubmitting}
                     />
 
                     <Text style={styles.label}>Contact Email</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder="Enter your contact email"
-                        placeholderTextColor="#7A7A7A"
-                        autoCapitalize="none"
-                        keyboardType="email-address"
                         value={claimEmail}
                         onChangeText={setClaimEmail}
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        editable={!isSubmitting}
                     />
 
-                    <Text style={styles.label}>Why are you claiming this van?</Text>
+                    <Text style={styles.label}>Claim Message</Text>
                     <TextInput
                         style={[styles.input, styles.textArea]}
-                        placeholder="Tell BiteBeacon why this van belongs to you"
-                        placeholderTextColor="#7A7A7A"
                         value={claimMessage}
                         onChangeText={setClaimMessage}
                         multiline
+                        editable={!isSubmitting}
                     />
 
                     <Text style={styles.label}>Choose 3 verification methods</Text>
-                    <Text style={styles.helperText}>
-                        Choose exactly 3 proof methods, then send your evidence to
-                        support@bitebeacon.uk using the same email as this claim.
-                    </Text>
 
                     {VERIFICATION_OPTIONS.map((method) => {
                         const isSelected = verificationMethods.includes(method);
@@ -236,6 +251,7 @@ export default function ClaimVendorScreen() {
                                     isSelected && styles.verificationOptionSelected,
                                 ]}
                                 onPress={() => toggleVerificationMethod(method)}
+                                disabled={isSubmitting}
                             >
                                 <Text
                                     style={[
@@ -251,7 +267,10 @@ export default function ClaimVendorScreen() {
                     })}
 
                     <Pressable
-                        style={styles.primaryButton}
+                        style={[
+                            styles.primaryButton,
+                            isSubmitting && styles.buttonDisabled,
+                        ]}
                         onPress={handleSubmitClaim}
                         disabled={isSubmitting}
                     >
@@ -262,7 +281,11 @@ export default function ClaimVendorScreen() {
                 </>
             )}
 
-            <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Pressable
+                style={[styles.backButton, isSubmitting && styles.buttonDisabled]}
+                onPress={() => router.back()}
+                disabled={isSubmitting}
+            >
                 <Text style={styles.backButtonText}>Back</Text>
             </Pressable>
         </ScrollView>
@@ -270,21 +293,13 @@ export default function ClaimVendorScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: theme.colors.background,
-    },
-
-    content: {
-        padding: 24,
-        paddingBottom: 40,
-    },
+    container: { flex: 1, backgroundColor: theme.colors.background },
+    content: { padding: 24, paddingBottom: 40 },
 
     kicker: {
         fontSize: 12,
         fontWeight: "800",
         color: theme.colors.secondary,
-        letterSpacing: 1.2,
         marginBottom: 8,
     },
 
@@ -298,22 +313,10 @@ const styles = StyleSheet.create({
     subtitle: {
         fontSize: 15,
         color: "rgba(255,255,255,0.75)",
-        lineHeight: 22,
         marginBottom: 24,
     },
 
-    loadingText: {
-        fontSize: 15,
-        color: "rgba(255,255,255,0.75)",
-        marginBottom: 24,
-    },
-
-    helperText: {
-        fontSize: 14,
-        color: "rgba(255,255,255,0.75)",
-        lineHeight: 20,
-        marginBottom: 14,
-    },
+    loadingText: { color: "rgba(255,255,255,0.75)" },
 
     label: {
         fontSize: 14,
@@ -327,66 +330,61 @@ const styles = StyleSheet.create({
         borderWidth: 2,
         borderColor: theme.colors.border,
         borderRadius: 14,
-        paddingHorizontal: 14,
-        paddingVertical: 14,
+        padding: 14,
         marginBottom: 14,
     },
 
-    textArea: {
-        minHeight: 120,
-        textAlignVertical: "top",
-    },
+    textArea: { minHeight: 120, textAlignVertical: "top" },
 
     verificationOption: {
         backgroundColor: "#FFFFFF",
         borderWidth: 2,
         borderColor: theme.colors.border,
         borderRadius: 14,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
+        padding: 12,
         marginBottom: 10,
     },
 
     verificationOptionSelected: {
         backgroundColor: theme.colors.primary,
-        borderColor: theme.colors.primary,
     },
 
     verificationOptionText: {
-        color: "#222222",
-        fontSize: 14,
+        color: "#222",
         fontWeight: "700",
     },
 
     verificationOptionTextSelected: {
-        color: "#FFFFFF",
+        color: "#FFF",
     },
 
     primaryButton: {
         backgroundColor: theme.colors.primary,
-        paddingVertical: 15,
+        padding: 15,
         borderRadius: 16,
         alignItems: "center",
-        marginTop: 6,
-        marginBottom: 12,
+        marginTop: 10,
     },
 
     primaryButtonText: {
-        color: "#FFFFFF",
-        fontSize: 16,
+        color: "#FFF",
         fontWeight: "800",
     },
 
     backButton: {
         backgroundColor: "#D9D9D9",
-        paddingVertical: 15,
+        padding: 15,
         borderRadius: 16,
         alignItems: "center",
+        marginTop: 10,
     },
 
     backButtonText: {
-        color: "#222222",
-        fontSize: 16,
+        color: "#222",
         fontWeight: "700",
+    },
+
+    buttonDisabled: {
+        opacity: 0.6,
     },
 });

@@ -7,6 +7,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        lazy: true,
         tabBarActiveTintColor: "#FF7A00",
         tabBarInactiveTintColor: "rgba(255,255,255,0.5)",
         tabBarStyle: {
@@ -33,7 +34,6 @@ export default function TabLayout() {
           ),
         }}
       />
-
       <Tabs.Screen
         name="explore"
         options={{
@@ -47,7 +47,6 @@ export default function TabLayout() {
           ),
         }}
       />
-
       <Tabs.Screen
         name="favourites"
         options={{
@@ -61,7 +60,6 @@ export default function TabLayout() {
           ),
         }}
       />
-
       <Tabs.Screen
         name="account"
         options={{

@@ -19,20 +19,96 @@ export default function UserLoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isResending, setIsResending] = useState(false);
 
-  async function handleLogin() {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+  async function handleResendConfirmation() {
+    if (isResending) return;
 
-    if (error) {
-      Alert.alert("Login failed", error.message);
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedEmail) {
+      Alert.alert("Missing email", "Enter your email first.");
       return;
     }
 
-    Alert.alert("Success", "You are now logged in.");
-    router.replace("/(tabs)/account");
+    setIsResending(true);
+
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: trimmedEmail,
+      });
+
+      if (error) {
+        Alert.alert("Error", error.message);
+        return;
+      }
+
+      Alert.alert(
+        "Email sent 📩",
+        "We’ve sent another confirmation email. Check your inbox and spam."
+      );
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    } finally {
+      setIsResending(false);
+    }
+  }
+
+  async function handleLogin() {
+    if (isLoggingIn) return;
+
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedEmail) {
+      Alert.alert("Missing email", "Please enter your email address.");
+      return;
+    }
+
+    if (!password.trim()) {
+      Alert.alert("Missing password", "Please enter your password.");
+      return;
+    }
+
+    setIsLoggingIn(true);
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user && !user.email_confirmed_at) {
+        Alert.alert(
+          "Email not confirmed",
+          "Please confirm your email before logging in. Check your inbox or resend the confirmation email."
+        );
+        return;
+      }
+
+      if (error) {
+        Alert.alert("Login failed", error.message);
+        return;
+      }
+
+      Alert.alert("Success", "You are now logged in.");
+      router.replace("/(tabs)/account");
+    } catch (error) {
+      Alert.alert(
+        "Login failed",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+    } finally {
+      setIsLoggingIn(false);
+    }
   }
 
   return (
@@ -60,12 +136,14 @@ export default function UserLoginScreen() {
               placeholder="Enter your email"
               placeholderTextColor="#7A7A7A"
               autoCapitalize="none"
+              autoCorrect={false}
               keyboardType="email-address"
               autoComplete="email"
               textContentType="emailAddress"
               importantForAutofill="yes"
               value={email}
               onChangeText={setEmail}
+              editable={!isLoggingIn}
             />
 
             <Text style={styles.label}>Password</Text>
@@ -80,11 +158,16 @@ export default function UserLoginScreen() {
                 importantForAutofill="yes"
                 value={password}
                 onChangeText={setPassword}
+                editable={!isLoggingIn}
               />
 
               <Pressable
-                style={styles.showPasswordButton}
+                style={[
+                  styles.showPasswordButton,
+                  isLoggingIn && styles.buttonDisabled,
+                ]}
                 onPress={() => setShowPassword((current) => !current)}
+                disabled={isLoggingIn}
               >
                 <Text style={styles.showPasswordButtonText}>
                   {showPassword ? "Hide" : "Show"}
@@ -92,29 +175,46 @@ export default function UserLoginScreen() {
               </Pressable>
             </View>
 
-            <Pressable style={styles.primaryButton} onPress={handleLogin}>
-              <Text style={styles.primaryButtonText}>Log In</Text>
-            </Pressable>
-
             <Pressable
-              onPress={() => router.push("/auth/forgot-password")}
-              style={{ marginTop: 10, alignItems: "center" }}
+              style={[styles.primaryButton, isLoggingIn && styles.buttonDisabled]}
+              onPress={handleLogin}
+              disabled={isLoggingIn}
             >
-              <Text style={{ color: "#FF7A00", fontWeight: "700" }}>
-                Forgot password?
+              <Text style={styles.primaryButtonText}>
+                {isLoggingIn ? "Logging in..." : "Log In"}
               </Text>
             </Pressable>
 
             <Pressable
-              style={styles.secondaryButton}
+              onPress={() => router.push("/auth/forgot-password")}
+              style={[styles.linkButton, isLoggingIn && styles.buttonDisabled]}
+              disabled={isLoggingIn}
+            >
+              <Text style={styles.linkButtonText}>Forgot password?</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={handleResendConfirmation}
+              style={[styles.linkButton, isResending && styles.buttonDisabled]}
+              disabled={isResending}
+            >
+              <Text style={styles.linkButtonText}>
+                {isResending ? "Sending..." : "Resend confirmation email"}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.secondaryButton, isLoggingIn && styles.buttonDisabled]}
               onPress={() => router.push("/auth/user-signup")}
+              disabled={isLoggingIn}
             >
               <Text style={styles.secondaryButtonText}>Create User Account</Text>
             </Pressable>
 
             <Pressable
-              style={styles.backButton}
+              style={[styles.backButton, isLoggingIn && styles.buttonDisabled]}
               onPress={() => router.replace("/welcome")}
+              disabled={isLoggingIn}
             >
               <Text style={styles.backButtonText}>Back</Text>
             </Pressable>
@@ -129,18 +229,15 @@ const styles = StyleSheet.create({
   keyboardContainer: {
     flex: 1,
   },
-
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,
     padding: 24,
     justifyContent: "center",
   },
-
   heroBlock: {
     marginBottom: 24,
   },
-
   kicker: {
     fontSize: 12,
     fontWeight: "800",
@@ -148,20 +245,17 @@ const styles = StyleSheet.create({
     color: theme.colors.secondary,
     marginBottom: 8,
   },
-
   title: {
     fontSize: 34,
     fontWeight: "800",
     color: theme.colors.textOnDark,
     marginBottom: 8,
   },
-
   subtitle: {
     fontSize: 15,
     lineHeight: 22,
     color: "rgba(255,255,255,0.78)",
   },
-
   formCard: {
     backgroundColor: theme.colors.card,
     borderRadius: 24,
@@ -174,21 +268,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 4,
   },
-
   sectionTitle: {
     fontSize: 22,
     fontWeight: "800",
     color: theme.colors.background,
     marginBottom: 18,
   },
-
   label: {
     fontSize: 14,
     fontWeight: "700",
     color: theme.colors.background,
     marginBottom: 8,
   },
-
   input: {
     backgroundColor: "#FFFFFF",
     borderWidth: 2,
@@ -199,7 +290,6 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     color: theme.colors.text,
   },
-
   passwordWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -210,14 +300,12 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     overflow: "hidden",
   },
-
   passwordInput: {
     flex: 1,
     paddingHorizontal: 14,
     paddingVertical: 14,
     color: theme.colors.text,
   },
-
   showPasswordButton: {
     paddingHorizontal: 14,
     paddingVertical: 14,
@@ -225,13 +313,11 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderLeftColor: theme.colors.border,
   },
-
   showPasswordButtonText: {
     color: theme.colors.primary,
     fontSize: 13,
     fontWeight: "800",
   },
-
   primaryButton: {
     backgroundColor: theme.colors.background,
     paddingVertical: 15,
@@ -239,13 +325,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
-
   primaryButtonText: {
     color: theme.colors.textOnDark,
     fontSize: 16,
     fontWeight: "800",
   },
-
+  linkButton: {
+    marginTop: 10,
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  linkButtonText: {
+    color: "#FF7A00",
+    fontWeight: "700",
+  },
   secondaryButton: {
     backgroundColor: theme.colors.primary,
     paddingVertical: 15,
@@ -253,23 +346,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
-
   secondaryButtonText: {
     color: theme.colors.textOnDark,
     fontSize: 16,
     fontWeight: "800",
   },
-
   backButton: {
     backgroundColor: "#D9D9D9",
     paddingVertical: 15,
     borderRadius: 16,
     alignItems: "center",
   },
-
   backButtonText: {
     color: "#222222",
     fontSize: 16,
     fontWeight: "700",
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });

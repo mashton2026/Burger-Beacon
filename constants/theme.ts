@@ -1,9 +1,8 @@
-export const theme = {
+export const theme = Object.freeze({
   brand: {
     name: "BiteBeacon",
     tagline: "Discover the best street food near you",
   },
-
   colors: {
     primary: "#FF7A00",
     secondary: "#FFC107",
@@ -17,4 +16,4 @@ export const theme = {
     success: "#1DB954",
     danger: "#C62828",
   },
-} as const;
+} as const);

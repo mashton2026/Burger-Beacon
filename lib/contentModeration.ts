@@ -5,7 +5,7 @@ type ValidationOptions = {
     maxLength?: number;
 };
 
-const PROFANITY_PATTERNS = [
+const PROFANITY_PATTERNS: readonly RegExp[] = [
     /\bfuck(?:ing|er|ed|s)?\b/i,
     /\bshit(?:ty|ting|ted|s)?\b/i,
     /\bbitch(?:es|y)?\b/i,
@@ -18,16 +18,17 @@ const PROFANITY_PATTERNS = [
     /\bnigg(?:er|ers|a|as)\b/i,
 ];
 
-export function normalizeModerationText(value: string) {
+export function normalizeModerationText(value: string): string {
     return value.replace(/\s+/g, " ").trim();
 }
 
-export function containsProfanity(value: string) {
-    return PROFANITY_PATTERNS.some((pattern) => pattern.test(value));
+export function containsProfanity(value: string): boolean {
+    const normalized = normalizeModerationText(value);
+    return PROFANITY_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
-export function looksLikeSpam(value: string) {
-    const normalized = value.trim();
+export function looksLikeSpam(value: string): boolean {
+    const normalized = normalizeModerationText(value);
 
     if (!normalized) return false;
 
@@ -56,11 +57,11 @@ export function validateModeratedText(
         return options.allowEmpty ? null : `${options.fieldLabel} is required.`;
     }
 
-    if (options.minLength && value.length < options.minLength) {
+    if (typeof options.minLength === "number" && value.length < options.minLength) {
         return `${options.fieldLabel} must be at least ${options.minLength} characters.`;
     }
 
-    if (options.maxLength && value.length > options.maxLength) {
+    if (typeof options.maxLength === "number" && value.length > options.maxLength) {
         return `${options.fieldLabel} must be ${options.maxLength} characters or less.`;
     }
 

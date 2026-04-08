@@ -31,18 +31,24 @@ export default function SecurityScreen() {
   }, []);
 
   async function loadUser(): Promise<void> {
-    const user = await getCurrentUser();
+    try {
+      const user = await getCurrentUser();
 
-    if (!user) {
+      if (!user) {
+        setCurrentEmail(null);
+        setCurrentUserId(null);
+        setNewEmail("");
+        return;
+      }
+
+      setCurrentEmail(user.email ?? null);
+      setCurrentUserId(user.id);
+      setNewEmail(user.email ?? "");
+    } catch {
       setCurrentEmail(null);
       setCurrentUserId(null);
       setNewEmail("");
-      return;
     }
-
-    setCurrentEmail(user.email ?? null);
-    setCurrentUserId(user.id);
-    setNewEmail(user.email ?? "");
   }
 
   async function handleUpdateEmail(): Promise<void> {
@@ -73,11 +79,9 @@ export default function SecurityScreen() {
         return;
       }
 
-      setCurrentEmail(newEmail.trim());
-
       Alert.alert(
         "Email update requested",
-        "Check your inbox if confirmation is required."
+        "Check your inbox if confirmation is required. Your current email will remain unchanged until the update is completed."
       );
     } catch (error) {
       Alert.alert(
@@ -105,8 +109,8 @@ export default function SecurityScreen() {
       return;
     }
 
-    if (newPassword.length < 6) {
-      Alert.alert("Password too short", "Use at least 6 characters.");
+    if (newPassword.length < 8) {
+      Alert.alert("Password too short", "Use at least 8 characters.");
       return;
     }
 
@@ -124,7 +128,6 @@ export default function SecurityScreen() {
 
       setNewPassword("");
       setConfirmPassword("");
-
       Alert.alert("Password updated", "Your password has been changed.");
     } catch (error) {
       Alert.alert(
@@ -153,7 +156,9 @@ export default function SecurityScreen() {
       return;
     }
 
-    const reasonError = validateModeratedText(deleteReason, {
+    const trimmedReason = deleteReason.trim();
+
+    const reasonError = validateModeratedText(trimmedReason, {
       fieldLabel: "Deletion reason",
       allowEmpty: true,
       maxLength: 300,
@@ -170,15 +175,14 @@ export default function SecurityScreen() {
       await createAccountDeletionRequest({
         userId: currentUserId,
         email: currentEmail,
-        reason: deleteReason,
+        reason: trimmedReason,
       });
 
       setDeleteReason("");
       setDeleteConfirmText("");
-
       Alert.alert(
         "Deletion request submitted",
-        "Your request has been recorded and will be reviewed."
+        "Your request has been recorded and will be reviewed. You may be contacted if additional verification is required."
       );
     } catch (error) {
       Alert.alert(
@@ -214,7 +218,10 @@ export default function SecurityScreen() {
       />
 
       <Pressable
-        style={styles.primaryButton}
+        style={[
+          styles.primaryButton,
+          isUpdatingEmail && styles.buttonDisabled,
+        ]}
         onPress={handleUpdateEmail}
         disabled={isUpdatingEmail}
       >
@@ -243,8 +250,13 @@ export default function SecurityScreen() {
         onChangeText={setConfirmPassword}
       />
 
+      <Text style={styles.helperText}>Use at least 8 characters.</Text>
+
       <Pressable
-        style={styles.primaryButton}
+        style={[
+          styles.primaryButton,
+          isUpdatingPassword && styles.buttonDisabled,
+        ]}
         onPress={handleUpdatePassword}
         disabled={isUpdatingPassword}
       >
@@ -256,7 +268,9 @@ export default function SecurityScreen() {
       <Text style={styles.dangerTitle}>Account Deletion</Text>
       <Text style={styles.dangerText}>
         This sends a deletion request for review. For safety, account deletion is
-        not instant inside the app.
+        not instant inside the app. In some cases, BiteBeacon may retain limited
+        data where required for legal, security, fraud-prevention, billing,
+        dispute-resolution, or platform integrity reasons.
       </Text>
 
       <TextInput
@@ -270,7 +284,7 @@ export default function SecurityScreen() {
       />
 
       <Text style={styles.helperText}>
-        Type DELETE below to confirm this request.
+        Type DELETE below to confirm this request. You can also contact support if you need help with account deletion.
       </Text>
 
       <TextInput
@@ -283,7 +297,10 @@ export default function SecurityScreen() {
       />
 
       <Pressable
-        style={styles.deleteButton}
+        style={[
+          styles.deleteButton,
+          isSubmittingDeletion && styles.buttonDisabled,
+        ]}
         onPress={handleRequestDeletion}
         disabled={isSubmittingDeletion}
       >
@@ -306,33 +323,28 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-
   content: {
     padding: 24,
     paddingBottom: 40,
   },
-
   kicker: {
     fontSize: 12,
     fontWeight: "800",
     color: theme.colors.secondary,
     marginBottom: 8,
   },
-
   title: {
     fontSize: 30,
     fontWeight: "800",
     color: theme.colors.textOnDark,
     marginBottom: 8,
   },
-
   subtitle: {
     fontSize: 15,
     color: "rgba(255,255,255,0.75)",
     marginBottom: 24,
     lineHeight: 22,
   },
-
   sectionTitle: {
     fontSize: 18,
     fontWeight: "800",
@@ -340,13 +352,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginTop: 16,
   },
-
   helperText: {
     fontSize: 14,
     color: "rgba(255,255,255,0.6)",
     marginBottom: 10,
   },
-
   input: {
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
@@ -354,12 +364,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     color: "#222222",
   },
-
   deleteReasonInput: {
     minHeight: 110,
     textAlignVertical: "top",
   },
-
   primaryButton: {
     backgroundColor: theme.colors.primary,
     padding: 14,
@@ -367,12 +375,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 8,
   },
-
   primaryButtonText: {
     color: "#FFFFFF",
     fontWeight: "800",
   },
-
   dangerTitle: {
     fontSize: 18,
     fontWeight: "800",
@@ -380,14 +386,12 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 8,
   },
-
   dangerText: {
     fontSize: 14,
     color: "rgba(255,255,255,0.75)",
     lineHeight: 21,
     marginBottom: 12,
   },
-
   deleteButton: {
     backgroundColor: "#C62828",
     padding: 14,
@@ -395,12 +399,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 8,
   },
-
   deleteButtonText: {
     color: "#FFFFFF",
     fontWeight: "800",
   },
-
+  buttonDisabled: {
+    opacity: 0.6,
+  },
   backButton: {
     marginTop: 20,
     backgroundColor: "#D9D9D9",
@@ -408,7 +413,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
   },
-
   backButtonText: {
     color: "#222222",
     fontWeight: "700",

@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
+
 import { useState } from "react";
 import {
     Alert,
@@ -9,6 +10,7 @@ import {
     TextInput,
     View,
 } from "react-native";
+
 import { theme } from "../../constants/theme";
 import { validateModeratedText } from "../../lib/contentModeration";
 import { getCurrentUser } from "../../services/authService";
@@ -36,6 +38,9 @@ export default function ReportVendorScreen() {
     const [submitting, setSubmitting] = useState(false);
 
     async function submitReport() {
+        // ✅ SAFE GUARD: prevents double submission
+        if (submitting) return;
+
         if (!vendorId) {
             Alert.alert("Error", "No vendor listing was provided.");
             return;
@@ -74,7 +79,8 @@ export default function ReportVendorScreen() {
                 vendorId,
                 reporterUserId: user.id,
                 reason: selectedReason,
-                details,
+                // ✅ SAFE: trim input before sending
+                details: details.trim(),
             });
 
             Alert.alert(
@@ -167,12 +173,10 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: theme.colors.background,
     },
-
     content: {
         padding: 24,
         paddingBottom: 40,
     },
-
     kicker: {
         fontSize: 12,
         fontWeight: "800",
@@ -180,21 +184,18 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         letterSpacing: 1.2,
     },
-
     title: {
         fontSize: 30,
         fontWeight: "800",
         color: theme.colors.textOnDark,
         marginBottom: 8,
     },
-
     subtitle: {
         fontSize: 15,
         color: "rgba(255,255,255,0.75)",
         lineHeight: 22,
         marginBottom: 24,
     },
-
     sectionTitle: {
         fontSize: 14,
         fontWeight: "800",
@@ -204,11 +205,9 @@ const styles = StyleSheet.create({
         letterSpacing: 0.8,
         textTransform: "uppercase",
     },
-
     reasonList: {
         marginBottom: 18,
     },
-
     reasonButton: {
         backgroundColor: "rgba(255,255,255,0.06)",
         borderWidth: 1.5,
@@ -218,22 +217,18 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         marginBottom: 10,
     },
-
     reasonButtonSelected: {
         backgroundColor: "rgba(255,122,0,0.14)",
         borderColor: theme.colors.secondary,
     },
-
     reasonButtonText: {
         color: theme.colors.textOnDark,
         fontSize: 15,
         fontWeight: "700",
     },
-
     reasonButtonTextSelected: {
         color: theme.colors.secondary,
     },
-
     input: {
         backgroundColor: "#FFFFFF",
         borderRadius: 12,
@@ -243,14 +238,12 @@ const styles = StyleSheet.create({
         marginBottom: 10,
         color: "#222222",
     },
-
     helperText: {
         fontSize: 13,
         color: "rgba(255,255,255,0.68)",
         marginBottom: 16,
         lineHeight: 19,
     },
-
     submitButton: {
         backgroundColor: theme.colors.primary,
         padding: 14,
@@ -258,17 +251,14 @@ const styles = StyleSheet.create({
         alignItems: "center",
         marginBottom: 10,
     },
-
     submitButtonText: {
         color: "#FFFFFF",
         fontWeight: "800",
         fontSize: 16,
     },
-
     disabledButton: {
         opacity: 0.7,
     },
-
     backButton: {
         marginTop: 10,
         backgroundColor: "#D9D9D9",
@@ -276,7 +266,6 @@ const styles = StyleSheet.create({
         borderRadius: 14,
         alignItems: "center",
     },
-
     backButtonText: {
         color: "#222222",
         fontWeight: "700",
